@@ -5,7 +5,8 @@ import type { BinSide, ParcelColor } from '../src/types/game';
 import { createSeededRandom } from '../src/game/utils/random';
 import { advance, advanceUntilSpawn, eventTypes, makeSession, TEST_DIFFICULTY } from './helpers';
 
-const CORRECT_SIDE: Readonly<Record<ParcelColor, BinSide>> = { BLUE: 'LEFT', RED: 'RIGHT' };
+// YELLOW and GREEN are only here to satisfy the wider ParcelColor type; these sessions never spawn them.
+const CORRECT_SIDE: Readonly<Record<ParcelColor, BinSide>> = { BLUE: 'LEFT', RED: 'RIGHT', YELLOW: 'LEFT', GREEN: 'RIGHT' };
 
 function activeColor(session: ReturnType<typeof makeSession>): ParcelColor {
   const active = session.activeParcel;

@@ -3,20 +3,21 @@ import type { BinSide, RunStats } from '../../types/game';
 import type { PlayerIntent } from '../config/controls';
 import { MAX_FRAME_DELTA_MS } from '../config/display';
 import { DEFAULT_DIFFICULTY } from '../config/difficulty';
-import { PARCEL_COLORS } from '../data/parcelCatalog';
-import { DEFAULT_RULE } from '../data/sortingRules';
+import type { SortingRule } from '../data/sortingRules';
 import { Conveyor } from '../entities/Conveyor';
 import { ParcelView } from '../entities/ParcelView';
 import { SortBin } from '../entities/SortBin';
 import { InputController } from '../systems/InputController';
 import { watchLayout } from '../systems/ResponsiveScaler';
-import { clausesForSide } from '../systems/RuleEvaluator';
-import { RunSession, type SessionEvent } from '../systems/RunSession';
+import { RunSession, type BonusKind, type SessionEvent } from '../systems/RunSession';
+import { ShiftManager } from '../systems/ShiftManager';
 import { Backdrop } from '../ui/Backdrop';
 import { FeedbackLayer } from '../ui/FeedbackLayer';
 import { Hud } from '../ui/Hud';
-import { beltProgressToY, computeLayout, type GameLayout } from '../ui/layout';
+import { beltProgressToY, computeLayout, type GameLayout, type Point } from '../ui/layout';
 import { NeonButton } from '../ui/NeonButton';
+import { glyphsForSide } from '../ui/ruleGlyphs';
+import { ShiftAnnouncement } from '../ui/ShiftAnnouncement';
 import { COLORS, CSS, DEPTH } from '../ui/theme';
 import { createSeededRandom, randomSeed } from '../utils/random';
 import { fadeIn, SceneDirector } from './SceneDirector';
@@ -31,11 +32,21 @@ interface DepotView {
   readonly buttons: Readonly<Record<BinSide, NeonButton>>;
   readonly hud: Hud;
   readonly feedback: FeedbackLayer;
+  readonly announcement: ShiftAnnouncement;
   readonly parcels: readonly ParcelView[];
 }
 
 const RUN_END_DELAY_MS = 1100;
-const PARCEL_POOL_SIZE = 2;
+// One parcel on the belt plus up to two still finishing their exit animation.
+const PARCEL_POOL_SIZE = 3;
+const BELT_SPEED_DURING_SHIFT_CHANGE = 0.3;
+const BELT_EASE_MS = 320;
+
+const BONUS_LABELS: Readonly<Record<BonusKind, string>> = {
+  STREAK: 'STREAK',
+  GOLDEN: 'GOLDEN',
+  PERFECT_SHIFT: 'PERFECT',
+};
 
 /**
  * The PLAYING scene. Game rules live in RunSession; this scene only feeds it
@@ -49,7 +60,7 @@ export class GameScene extends Phaser.Scene {
   private inputController: InputController | null = null;
   private endTimer: Phaser.Time.TimerEvent | null = null;
   private beltSpeedFactor = 1;
-  private shownSpeedLevel = 1;
+  private zoneNotifiedParcel: number | null = null;
 
   constructor() {
     super(SceneKeys.GAME);
@@ -57,11 +68,11 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.director = SceneDirector.from(this);
-    this.session = new RunSession({ rule: DEFAULT_RULE, random: createSeededRandom(randomSeed()) });
+    this.session = new RunSession({ shifts: new ShiftManager(), random: createSeededRandom(randomSeed()) });
     this.activeParcelView = null;
     this.endTimer = null;
     this.beltSpeedFactor = 1;
-    this.shownSpeedLevel = 1;
+    this.zoneNotifiedParcel = null;
 
     this.buildView();
 
@@ -72,25 +83,34 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.cleanup, this);
 
     fadeIn(this);
-    this.view?.feedback.showBanner('SHIFT START', CSS.cyan, 450);
   }
 
   override update(_time: number, delta: number): void {
-    const view = this.view;
-    if (!view || !this.director.machine.is('PLAYING')) return;
+    if (!this.view || !this.director.machine.is('PLAYING')) return;
 
     const dt = Math.min(delta, MAX_FRAME_DELTA_MS);
     this.applyEvents(this.session.update(dt));
+    const view = this.view;
 
-    // Belt keeps running between parcels; it winds down once the run ends.
-    if (this.session.isOver) this.beltSpeedFactor = Math.max(0, this.beltSpeedFactor - dt / 700);
+    const transition = this.session.transition;
+    const announcing = transition?.stage === 'ANNOUNCING';
+    if (transition && announcing) view.announcement.setProgress(transition.remainingMs / transition.durationMs);
+
+    // The belt eases down for a shift change and winds to a stop when the run ends.
+    const targetSpeed = this.session.isOver ? 0 : this.session.phase === 'TRANSITION' ? BELT_SPEED_DURING_SHIFT_CHANGE : 1;
+    this.beltSpeedFactor += (targetSpeed - this.beltSpeedFactor) * Math.min(1, dt / BELT_EASE_MS);
     const belt = view.layout.belt;
     const pixelsPerMs = ((belt.decisionY - belt.spawnY) / this.session.currentTravelTimeMs) * this.beltSpeedFactor;
     const active = this.session.activeParcel;
-    view.conveyor.update(dt, pixelsPerMs, active?.inDecisionZone ?? false);
+    view.conveyor.update(dt, pixelsPerMs, active?.inDecisionZone ?? false, announcing);
 
     if (active && this.activeParcelView?.parcelId === active.parcel.id) {
-      this.activeParcelView.setY(beltProgressToY(belt, active.progress));
+      this.activeParcelView.setBeltPosition(beltProgressToY(belt, active.progress), active.progress);
+      if (active.inDecisionZone && this.zoneNotifiedParcel !== active.parcel.id) {
+        this.zoneNotifiedParcel = active.parcel.id;
+        view.conveyor.pulseZone();
+        this.activeParcelView.enterZone();
+      }
     }
   }
 
@@ -126,6 +146,7 @@ export class GameScene extends Phaser.Scene {
     const view = this.view;
     if (!view) return;
     const belt = view.layout.belt;
+    let lastMouth: Point = { x: belt.x, y: belt.decisionY };
 
     for (const event of events) {
       switch (event.type) {
@@ -133,13 +154,16 @@ export class GameScene extends Phaser.Scene {
           const parcelView = this.acquireParcelView(view);
           parcelView.present(event.parcel, belt.x, beltProgressToY(belt, 0));
           this.activeParcelView = parcelView;
+          if (event.parcel.kind === 'GOLDEN') view.feedback.popup(belt.x, belt.spawnY + 40, 'GOLDEN', CSS.gold);
           break;
         }
         case 'PARCEL_SORTED': {
           const bin = view.bins[event.chosen];
           const mouth = bin.mouth;
+          lastMouth = mouth;
           this.takeActiveParcelView(event.parcel.id)?.playSorted(mouth, event.correct, () => undefined);
           bin.flash(event.correct);
+          view.conveyor.flashGate(event.chosen, event.correct);
           view.feedback.burst(mouth.x, mouth.y, event.correct);
           if (event.correct) {
             view.feedback.popup(mouth.x, mouth.y - 70, `+${event.pointsAwarded}`, CSS.success);
@@ -159,17 +183,45 @@ export class GameScene extends Phaser.Scene {
         }
         case 'SCORE_CHANGED': {
           view.hud.setScore(event.score, true);
-          const level = this.session.speedLevel;
-          view.hud.setSpeedLevel(level);
-          if (level > this.shownSpeedLevel) {
-            this.shownSpeedLevel = level;
-            view.feedback.showBanner(`SPEED ${level}`, CSS.magenta, 450);
-          }
+          this.refreshShiftReadout(view);
           break;
         }
         case 'MISTAKES_CHANGED': {
           view.hud.setMistakesRemaining(event.remaining, true);
           if (event.remaining === 1) view.feedback.showBanner('LAST CHANCE', CSS.amber, 600);
+          break;
+        }
+        case 'COMBO_CHANGED': {
+          const status = this.session.comboStatus;
+          view.hud.setCombo(event.combo.streak, event.combo.multiplier, status?.nextTierAt ?? null, !event.combo.broken);
+          if (event.combo.multiplierIncreased) {
+            view.feedback.showBanner(`COMBO ×${event.combo.multiplier}`, CSS.amber, 380);
+          }
+          if (event.combo.broken && event.combo.previousStreak >= 5) {
+            view.hud.showComboCallout('LOST', CSS.danger);
+          }
+          break;
+        }
+        case 'BONUS_AWARDED': {
+          this.showBonus(view, event.kind, event.points, lastMouth);
+          break;
+        }
+        case 'SHIFT_COMPLETED': {
+          const message = event.perfect ? 'PERFECT SHIFT' : `SHIFT ${event.shift} CLEAR`;
+          view.feedback.showBanner(message, event.perfect ? CSS.gold : CSS.success, 420);
+          this.refreshShiftReadout(view);
+          break;
+        }
+        case 'SHIFT_ANNOUNCED': {
+          this.showRule(view, event.plan.rule, true);
+          this.refreshShiftReadout(view);
+          view.announcement.show(event.plan, event.opening, true);
+          if (event.plan.warning) this.cameras.main.shake(260, 0.005);
+          break;
+        }
+        case 'SHIFT_STARTED': {
+          view.announcement.hide();
+          view.feedback.showBanner('GO', CSS.success, 160);
           break;
         }
         case 'RUN_ENDED': {
@@ -178,6 +230,29 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+  }
+
+  private showBonus(view: DepotView, kind: BonusKind, points: number, mouth: Point): void {
+    const text = `${BONUS_LABELS[kind]} +${points}`;
+    if (kind === 'GOLDEN') {
+      view.feedback.goldBurst(mouth.x, mouth.y);
+      view.feedback.popup(mouth.x, mouth.y - 118, text, CSS.gold);
+    } else if (kind === 'STREAK') {
+      view.hud.showComboCallout(`+${points}`, CSS.amber);
+    } else {
+      view.feedback.popup(view.hud.scoreAnchor.x, view.hud.scoreAnchor.y, text, CSS.gold);
+    }
+  }
+
+  private refreshShiftReadout(view: DepotView): void {
+    const status = this.session.shiftStatus;
+    if (status) view.hud.setShift(status.plan, status.correct);
+  }
+
+  private showRule(view: DepotView, rule: SortingRule, animate: boolean): void {
+    view.hud.setRule(rule, animate);
+    view.bins.LEFT.setAccepts(glyphsForSide(rule, 'LEFT'));
+    view.bins.RIGHT.setAccepts(glyphsForSide(rule, 'RIGHT'));
   }
 
   private handleRunEnded(stats: RunStats): void {
@@ -224,11 +299,9 @@ export class GameScene extends Phaser.Scene {
       y: layout.bins.LEFT.y - layout.bins.LEFT.height * 0.12,
     });
 
-    const acceptsFor = (side: BinSide) =>
-      clausesForSide(rule, side).flatMap((clause) => (clause.when.color ? [PARCEL_COLORS[clause.when.color]] : []));
     const bins: Record<BinSide, SortBin> = {
-      LEFT: new SortBin(this, layout.bins.LEFT, 'LEFT', acceptsFor('LEFT'), layout.uiScale),
-      RIGHT: new SortBin(this, layout.bins.RIGHT, 'RIGHT', acceptsFor('RIGHT'), layout.uiScale),
+      LEFT: new SortBin(this, layout.bins.LEFT, 'LEFT', glyphsForSide(rule, 'LEFT'), layout.uiScale),
+      RIGHT: new SortBin(this, layout.bins.RIGHT, 'RIGHT', glyphsForSide(rule, 'RIGHT'), layout.uiScale),
     };
 
     const makeButton = (side: BinSide): NeonButton => {
@@ -257,20 +330,30 @@ export class GameScene extends Phaser.Scene {
     });
     hud.setScore(this.session.score, false);
     hud.setMistakesRemaining(this.session.mistakesRemaining, false);
-    hud.setSpeedLevel(this.session.speedLevel);
 
     const feedback = new FeedbackLayer(this, layout.banner.x, layout.banner.y, layout.uiScale);
+    const announcement = new ShiftAnnouncement(this, layout);
     const parcels: ParcelView[] = [];
     for (let i = 0; i < PARCEL_POOL_SIZE; i += 1) parcels.push(new ParcelView(this, layout.belt.parcelSize));
 
-    this.view = { layout, backdrop, conveyor, bins, buttons, hud, feedback, parcels };
+    const view: DepotView = { layout, backdrop, conveyor, bins, buttons, hud, feedback, announcement, parcels };
+    this.view = view;
 
-    // Restore the in-flight parcel (if any) at its logical position.
+    this.refreshShiftReadout(view);
+    const combo = this.session.comboStatus;
+    if (combo) hud.setCombo(combo.streak, combo.multiplier, combo.nextTierAt, false);
+
+    // Restore an in-flight announcement or parcel at its logical state.
+    const transition = this.session.transition;
+    if (transition?.stage === 'ANNOUNCING') {
+      announcement.show(transition.plan, transition.opening, false);
+      announcement.setProgress(transition.remainingMs / transition.durationMs);
+    }
     this.activeParcelView = null;
     const active = this.session.activeParcel;
     if (active) {
-      const parcelView = this.acquireParcelView(this.view);
-      parcelView.present(active.parcel, layout.belt.x, beltProgressToY(layout.belt, active.progress));
+      const parcelView = this.acquireParcelView(view);
+      parcelView.present(active.parcel, layout.belt.x, beltProgressToY(layout.belt, active.progress), false);
       this.activeParcelView = parcelView;
     }
     if (this.session.isOver) {
@@ -286,6 +369,7 @@ export class GameScene extends Phaser.Scene {
     this.view = null;
     this.activeParcelView = null;
     for (const parcel of view.parcels) parcel.destroy();
+    view.announcement.destroy();
     view.feedback.destroy();
     view.hud.destroy();
     view.buttons.LEFT.destroy();

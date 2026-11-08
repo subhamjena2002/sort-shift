@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { BinSide } from '../../types/game';
 import { HATCH_HEIGHT_ABOVE_BELT, type BeltLayout } from '../ui/layout';
 import { drawArrow } from '../ui/Panel';
 import { ensureBeltTile, TEXTURES } from '../ui/textures';
@@ -6,7 +7,9 @@ import { COLORS, CSS, DEPTH, textStyle } from '../ui/theme';
 
 const RAIL_WIDTH = 24;
 const GEAR_SPACING = 62;
-const GEAR_RADIUS = 14;
+const GEAR_RADIUS = 12.5;
+/** Belt speed (px/ms) at which the motion streaks reach full strength. */
+const STREAK_FULL_SPEED = 0.24;
 
 /**
  * The vertical conveyor: housing and rails, a scrolling belt surface, side
@@ -25,6 +28,14 @@ export class Conveyor {
   private readonly zoneGlow: Phaser.GameObjects.Graphics;
   private readonly gateLine: Phaser.GameObjects.Graphics;
   private readonly rejectFlash: Phaser.GameObjects.Graphics;
+  private readonly streaks: Phaser.GameObjects.TileSprite;
+  private readonly railChases: Phaser.GameObjects.TileSprite[] = [];
+  private readonly zoneFlash: Phaser.GameObjects.Graphics;
+  private readonly alertStripes: Phaser.GameObjects.Graphics;
+  private readonly gateFlashes: Readonly<Record<BinSide, Phaser.GameObjects.Graphics>>;
+  private readonly gateFlashSize: number;
+  private readonly gateFlashX: Readonly<Record<BinSide, number>>;
+  private readonly gateY: number;
   private zoneHeat = 0;
   private clock = 0;
 
@@ -85,6 +96,14 @@ export class Conveyor {
     shade.fillRect(right - 18, belt.topY, 18, beltH);
     this.objects.push(shade);
 
+    // Motion streaks ride on the belt and fade in with speed.
+    this.streaks = scene.add
+      .tileSprite(x, belt.topY + beltH / 2, width - 12, beltH, TEXTURES.beltStreaks)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setAlpha(0)
+      .setDepth(DEPTH.belt);
+    this.objects.push(this.streaks);
+
     // ------------------------------------------------- decision zone
     this.zoneGlow = scene.add.graphics().setDepth(DEPTH.belt);
     // The zone starts where a parcel's leading edge enters it and ends at the
@@ -99,6 +118,20 @@ export class Conveyor {
     }
     this.zoneGlow.setAlpha(0.35);
     this.objects.push(this.zoneGlow);
+
+    // One-shot flash when a parcel enters the zone.
+    this.zoneFlash = scene.add.graphics().setDepth(DEPTH.belt).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    this.zoneFlash.fillStyle(COLORS.magenta, 0.45);
+    this.zoneFlash.fillRect(left, zoneTop, width, belt.decisionY - zoneTop);
+    this.objects.push(this.zoneFlash);
+
+    // Hazard stripes across the belt, strobed while a shift change is announced.
+    this.alertStripes = scene.add.graphics().setDepth(DEPTH.belt).setAlpha(0);
+    this.alertStripes.fillStyle(COLORS.amber, 0.55);
+    for (let sx = left; sx < right; sx += 44) {
+      this.alertStripes.fillTriangle(sx, zoneTop, sx + 22, zoneTop, sx, belt.decisionY);
+    }
+    this.objects.push(this.alertStripes);
 
     const zoneLabel = scene.add
       .text(x, zoneTop - 4, 'SORT ZONE', textStyle({ size: 15, color: CSS.magenta, letterSpacing: 4 }))
@@ -118,6 +151,16 @@ export class Conveyor {
     drawArrow(this.gateLine, right + RAIL_WIDTH + 22, gateY, 20, 'right', COLORS.magenta, 1);
     this.objects.push(this.gateLine);
 
+    // Result flashes over the gate arrows, pointing the way the parcel went.
+    this.gateY = gateY;
+    this.gateFlashSize = 34;
+    this.gateFlashX = { LEFT: left - RAIL_WIDTH - 22, RIGHT: right + RAIL_WIDTH + 22 };
+    this.gateFlashes = {
+      LEFT: scene.add.graphics().setDepth(DEPTH.beltOverlay).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0),
+      RIGHT: scene.add.graphics().setDepth(DEPTH.beltOverlay).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0),
+    };
+    this.objects.push(this.gateFlashes.LEFT, this.gateFlashes.RIGHT);
+
     // ------------------------------------------------- rollers (animate)
     for (let gy = belt.topY + 22; gy < belt.endY - 10; gy += GEAR_SPACING) {
       for (const gx of [left - RAIL_WIDTH / 2, right + RAIL_WIDTH / 2]) {
@@ -130,6 +173,24 @@ export class Conveyor {
       const roller = scene.add.tileSprite(x, ry, width + 8, 16, TEXTURES.rollerBar).setDepth(DEPTH.beltOverlay);
       this.endRollers.push(roller);
       this.objects.push(roller);
+      // Fixed shading on top sells the moving surface as a turning cylinder.
+      const cylinder = scene.add.graphics().setDepth(DEPTH.beltOverlay);
+      cylinder.fillGradientStyle(0x000000, 0x000000, COLORS.white, COLORS.white, 0.55, 0.55, 0.1, 0.1);
+      cylinder.fillRect(x - (width + 8) / 2, ry - 8, width + 8, 8);
+      cylinder.fillGradientStyle(COLORS.white, COLORS.white, 0x000000, 0x000000, 0.1, 0.1, 0.55, 0.55);
+      cylinder.fillRect(x - (width + 8) / 2, ry, width + 8, 8);
+      this.objects.push(cylinder);
+    }
+
+    // Lights that chase along the rails at belt speed.
+    for (const chaseX of [left - RAIL_WIDTH - 2, right + RAIL_WIDTH + 2]) {
+      const chase = scene.add
+        .tileSprite(chaseX, belt.topY + beltH / 2, 6, beltH, TEXTURES.railChase)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setAlpha(0.8)
+        .setDepth(DEPTH.beltOverlay);
+      this.railChases.push(chase);
+      this.objects.push(chase);
     }
 
     // Cyan neon strips along the outer rail edges.
@@ -185,13 +246,18 @@ export class Conveyor {
    * @param deltaMs frame time
    * @param pixelsPerMs belt surface speed
    * @param zoneActive whether a parcel is inside the decision zone
+   * @param alert whether a shift change is being announced
    */
-  update(deltaMs: number, pixelsPerMs: number, zoneActive: boolean): void {
+  update(deltaMs: number, pixelsPerMs: number, zoneActive: boolean, alert = false): void {
     const distance = pixelsPerMs * deltaMs;
     this.surface.tilePositionY -= distance;
+    this.streaks.tilePositionY -= distance;
+    this.streaks.setAlpha(Math.min(1, pixelsPerMs / STREAK_FULL_SPEED) * 0.7);
+    for (const chase of this.railChases) chase.tilePositionY -= distance;
     for (const roller of this.endRollers) roller.tilePositionY -= distance;
     const spin = distance / GEAR_RADIUS;
     for (const gear of this.gears) gear.rotation += spin;
+    this.alertStripes.setAlpha(alert ? 0.45 + 0.45 * Math.sin(this.clock / 110) : 0);
 
     this.clock += deltaMs;
     const target = zoneActive ? 1 : 0;
@@ -207,12 +273,30 @@ export class Conveyor {
     this.scene.tweens.add({ targets: this.rejectFlash, alpha: 0, duration: 500, ease: 'Cubic.easeOut' });
   }
 
+  /** A parcel has just entered the sort zone. */
+  pulseZone(): void {
+    this.scene.tweens.killTweensOf(this.zoneFlash);
+    this.zoneFlash.setAlpha(1);
+    this.scene.tweens.add({ targets: this.zoneFlash, alpha: 0, duration: 260, ease: 'Quad.easeOut' });
+  }
+
+  /** Light the gate arrow on the side a parcel was sent to. */
+  flashGate(side: BinSide, success: boolean): void {
+    const flash = this.gateFlashes[side];
+    flash.clear();
+    drawArrow(flash, this.gateFlashX[side], this.gateY, this.gateFlashSize, side === 'LEFT' ? 'left' : 'right', success ? COLORS.success : COLORS.danger, 1);
+    this.scene.tweens.killTweensOf(flash);
+    flash.setAlpha(1);
+    this.scene.tweens.add({ targets: flash, alpha: 0, duration: 320, ease: 'Cubic.easeOut' });
+  }
+
   destroy(): void {
-    this.scene.tweens.killTweensOf(this.rejectFlash);
+    this.scene.tweens.killTweensOf([this.rejectFlash, this.zoneFlash, this.gateFlashes.LEFT, this.gateFlashes.RIGHT]);
     for (const obj of this.objects) obj.destroy();
     this.objects.length = 0;
     this.gears.length = 0;
     this.endRollers.length = 0;
+    this.railChases.length = 0;
   }
 
   private drawTransferLane(g: Phaser.GameObjects.Graphics, x1: number, x2: number, y: number, direction: 'left' | 'right'): void {

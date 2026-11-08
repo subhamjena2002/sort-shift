@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 
 /** Neon-industrial palette. Numeric values for Graphics, CSS strings for Text. */
 export const COLORS = {
@@ -19,6 +19,8 @@ export const COLORS = {
   amber: 0xffb020,
   success: 0x3dffa8,
   danger: 0xff5a3c,
+  gold: 0xffd76a,
+  goldDeep: 0xc98a12,
   white: 0xffffff,
   textDim: 0x7f94bd,
 } as const;
@@ -32,6 +34,7 @@ export const CSS = {
   amber: '#ffb020',
   success: '#3dffa8',
   danger: '#ff5a3c',
+  gold: '#ffd76a',
   navy: '#050b1a',
 } as const;
 
@@ -51,8 +54,10 @@ export const DEPTH = {
   parcel: 30,
   beltOverlay: 40,
   controls: 50,
+  dim: 55,
   hud: 60,
   feedback: 70,
+  announcement: 75,
   overlay: 100,
 } as const;
 

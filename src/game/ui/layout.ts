@@ -50,6 +50,12 @@ export interface GameLayout {
   readonly mistakes: Point;
   readonly pauseButton: Box;
   readonly rulePanel: Box;
+  /** Streak and multiplier readout. */
+  readonly comboPanel: Box;
+  /** Shift number, mode, quota progress and speed readout. */
+  readonly shiftPanel: Box;
+  /** Card shown while a new shift is announced. */
+  readonly announcement: Box;
   readonly belt: BeltLayout;
   readonly bins: Readonly<Record<BinSide, Box>>;
   readonly buttons: Readonly<Record<BinSide, Box>>;
@@ -95,7 +101,10 @@ function landscape(width: number, height: number, zoneStart: number): GameLayout
     score: { x: 40, y: 26 },
     mistakes: { x: width - 128, y: 26 },
     pauseButton: { x: width - 62, y: 58, width: 72, height: 72 },
-    rulePanel: { x: cx, y: 54, width: 500, height: 88 },
+    rulePanel: { x: cx, y: 54, width: 620, height: 88 },
+    comboPanel: { x: cx - binOffset, y: 232, width: 210, height: 130 },
+    shiftPanel: { x: cx + binOffset, y: 232, width: 210, height: 130 },
+    announcement: { x: cx, y: 368, width: 760, height: 430 },
     belt: belt(cx, 196, 144, 560, 646, 700, 104, zoneStart),
     bins: {
       LEFT: { x: cx - binOffset, y: 440, width: 250, height: 212 },
@@ -120,6 +129,9 @@ function portrait(width: number, height: number, zoneStart: number): GameLayout 
     mistakes: { x: width - 128, y: 34 },
     pauseButton: { x: width - 62, y: 72, width: 80, height: 80 },
     rulePanel: { x: cx, y: 224, width: 648, height: 112 },
+    comboPanel: { x: 122, y: 460, width: 196, height: 150 },
+    shiftPanel: { x: width - 122, y: 460, width: 196, height: 150 },
+    announcement: { x: cx, y: 600, width: 668, height: 500 },
     belt: belt(cx, 200, 322, 880, 962, 1016, 108, zoneStart),
     bins: {
       LEFT: { x: 126, y: 740, width: 204, height: 236 },

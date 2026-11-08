@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { PARCEL_COLORS, type ParcelColorDefinition } from '../data/parcelCatalog';
+import { ALL_COLORS, ALL_SHAPES, PARCEL_COLORS, parcelTextureKey, type ParcelColorDefinition } from '../data/parcelCatalog';
 import { COLORS } from './theme';
 
 /**
@@ -10,9 +10,15 @@ import { COLORS } from './theme';
  */
 export const TEXTURES = {
   parcelShadow: 'parcel-shadow',
+  parcelShadowCircle: 'parcel-shadow-circle',
   parcelGlow: 'parcel-glow',
+  goldRimSquare: 'gold-rim-square',
+  goldRimCircle: 'gold-rim-circle',
+  goldRays: 'gold-rays',
   roller: 'roller-gear',
   rollerBar: 'roller-bar',
+  beltStreaks: 'belt-streaks',
+  railChase: 'rail-chase',
   spark: 'spark',
   glowDot: 'glow-dot',
 } as const;
@@ -82,6 +88,92 @@ function drawParcel(g: Phaser.GameObjects.Graphics, def: ParcelColorDefinition):
   }
 }
 
+/** Round parcel. The silhouette alone tells it apart from a square one. */
+function drawCircleParcel(g: Phaser.GameObjects.Graphics, def: ParcelColorDefinition): void {
+  const c = PARCEL_TEXTURE_SIZE / 2;
+  const r = 58;
+
+  g.fillStyle(def.shade, 1);
+  g.fillCircle(c, c, r);
+  g.lineStyle(4, def.highlight, 0.9);
+  g.strokeCircle(c, c, r);
+  g.fillStyle(def.fill, 1);
+  g.fillCircle(c, c - 3, r - 7);
+
+  // Bevel highlight along the top of the drum.
+  g.fillStyle(def.highlight, 0.35);
+  g.fillEllipse(c, c - 36, 62, 16);
+
+  // Packing tape band, kept inside the circle, with a seam line.
+  const tapeH = 22;
+  const tapeW = 98;
+  const tapeY = c - tapeH / 2 - 4;
+  g.fillStyle(def.tape, 0.85);
+  g.fillRect(c - tapeW / 2, tapeY, tapeW, tapeH);
+  g.lineStyle(2, def.shade, 0.45);
+  g.lineBetween(c - tapeW / 2, tapeY + tapeH / 2, c + tapeW / 2, tapeY + tapeH / 2);
+
+  // Short barcode below the tape.
+  g.fillStyle(0x0b1022, 0.55);
+  const bars = [3, 1, 2, 1, 3, 1, 2];
+  let x = c - 26;
+  for (const w of bars) {
+    g.fillRect(x, c + 26, w * 2, 12);
+    x += w * 2 + 2;
+  }
+}
+
+function starPath(g: Phaser.GameObjects.Graphics, x: number, y: number, outer: number, inner: number): void {
+  g.beginPath();
+  for (let i = 0; i < 10; i += 1) {
+    const radius = i % 2 === 0 ? outer : inner;
+    const angle = -Math.PI / 2 + (Math.PI / 5) * i;
+    const px = x + Math.cos(angle) * radius;
+    const py = y + Math.sin(angle) * radius;
+    if (i === 0) g.moveTo(px, py);
+    else g.lineTo(px, py);
+  }
+  g.closePath();
+}
+
+/** Gold frame laid over a normal parcel, leaving its colour and shape readable. */
+function drawGoldRim(g: Phaser.GameObjects.Graphics, circle: boolean): void {
+  const s = PARCEL_TEXTURE_SIZE;
+  const c = s / 2;
+  g.lineStyle(9, COLORS.goldDeep, 1);
+  if (circle) g.strokeCircle(c, c, 58);
+  else g.strokeRoundedRect(6, 6, s - 12, s - 12, 14);
+  g.lineStyle(4, COLORS.gold, 1);
+  if (circle) g.strokeCircle(c, c, 58);
+  else g.strokeRoundedRect(6, 6, s - 12, s - 12, 14);
+
+  g.fillStyle(COLORS.goldDeep, 1);
+  starPath(g, c, 22, 19, 9);
+  g.fillPath();
+  g.fillStyle(COLORS.gold, 1);
+  starPath(g, c, 22, 14, 6.5);
+  g.fillPath();
+}
+
+function drawGoldRays(g: Phaser.GameObjects.Graphics): void {
+  const s = PARCEL_TEXTURE_SIZE * 1.5;
+  const c = s / 2;
+  const rays = 10;
+  g.fillStyle(COLORS.gold, 0.55);
+  for (let i = 0; i < rays; i += 1) {
+    const angle = (Math.PI * 2 * i) / rays;
+    const spread = Math.PI / rays / 2;
+    g.fillTriangle(
+      c + Math.cos(angle - spread) * 30,
+      c + Math.sin(angle - spread) * 30,
+      c + Math.cos(angle + spread) * 30,
+      c + Math.sin(angle + spread) * 30,
+      c + Math.cos(angle) * c,
+      c + Math.sin(angle) * c,
+    );
+  }
+}
+
 function drawParcelGlow(g: Phaser.GameObjects.Graphics): void {
   const s = PARCEL_TEXTURE_SIZE * 1.5;
   const c = s / 2;
@@ -119,6 +211,24 @@ function drawRollerBar(g: Phaser.GameObjects.Graphics): void {
   g.fillRect(0, 2, w, 3);
   g.fillStyle(COLORS.steelDark, 1);
   g.fillRect(0, 11, w, 4);
+  // Knurled grooves make the rotation visible along the whole roller.
+  g.fillStyle(COLORS.steelDark, 0.7);
+  for (let x = 4; x < w; x += 16) g.fillRect(x, 0, 4, h);
+}
+
+/** Sparse motion streaks, faded in as the belt gets faster. */
+function drawBeltStreaks(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(COLORS.cyan, 0.5);
+  g.fillRoundedRect(10, 12, 2, 40, 1);
+  g.fillRoundedRect(44, 74, 2, 52, 1);
+  g.fillStyle(COLORS.white, 0.35);
+  g.fillRoundedRect(28, 40, 2, 28, 1);
+}
+
+/** Dashes that chase along the rails at belt speed. */
+function drawRailChase(g: Phaser.GameObjects.Graphics): void {
+  g.fillStyle(COLORS.cyan, 1);
+  g.fillRoundedRect(1, 6, 4, 18, 2);
 }
 
 function drawBeltTile(g: Phaser.GameObjects.Graphics, width: number): void {
@@ -171,17 +281,31 @@ function drawGlowDot(g: Phaser.GameObjects.Graphics): void {
 
 /** Generate every shared texture. Safe to call more than once. */
 export function generateSharedTextures(scene: Phaser.Scene): void {
-  for (const def of Object.values(PARCEL_COLORS)) {
-    withGraphics(scene, def.textureKey, PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) => drawParcel(g, def));
+  for (const color of ALL_COLORS) {
+    const def = PARCEL_COLORS[color];
+    for (const shape of ALL_SHAPES) {
+      withGraphics(scene, parcelTextureKey(color, shape), PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) =>
+        shape === 'CIRCLE' ? drawCircleParcel(g, def) : drawParcel(g, def),
+      );
+    }
   }
   withGraphics(scene, TEXTURES.parcelShadow, PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) => {
     g.fillStyle(0x000000, 0.45);
     g.fillRoundedRect(8, 8, PARCEL_TEXTURE_SIZE - 16, PARCEL_TEXTURE_SIZE - 16, 18);
   });
+  withGraphics(scene, TEXTURES.parcelShadowCircle, PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) => {
+    g.fillStyle(0x000000, 0.45);
+    g.fillCircle(PARCEL_TEXTURE_SIZE / 2, PARCEL_TEXTURE_SIZE / 2, 56);
+  });
   const glowSize = PARCEL_TEXTURE_SIZE * 1.5;
   withGraphics(scene, TEXTURES.parcelGlow, glowSize, glowSize, drawParcelGlow);
+  withGraphics(scene, TEXTURES.goldRimSquare, PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) => drawGoldRim(g, false));
+  withGraphics(scene, TEXTURES.goldRimCircle, PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) => drawGoldRim(g, true));
+  withGraphics(scene, TEXTURES.goldRays, glowSize, glowSize, drawGoldRays);
   withGraphics(scene, TEXTURES.roller, 32, 32, drawRoller);
   withGraphics(scene, TEXTURES.rollerBar, 64, 16, drawRollerBar);
+  withGraphics(scene, TEXTURES.beltStreaks, 64, 144, drawBeltStreaks);
+  withGraphics(scene, TEXTURES.railChase, 6, 30, drawRailChase);
   withGraphics(scene, TEXTURES.spark, 10, 10, drawSpark);
   withGraphics(scene, TEXTURES.glowDot, 64, 64, drawGlowDot);
 }

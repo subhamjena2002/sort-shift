@@ -13,11 +13,12 @@ export class FeedbackLayer {
   private readonly banner: Phaser.GameObjects.Text;
   private readonly successBurst: Phaser.GameObjects.Particles.ParticleEmitter;
   private readonly failBurst: Phaser.GameObjects.Particles.ParticleEmitter;
+  private readonly goldenBurst: Phaser.GameObjects.Particles.ParticleEmitter;
   private nextPopup = 0;
 
   constructor(scene: Phaser.Scene, bannerX: number, bannerY: number, uiScale: number) {
     this.scene = scene;
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       const text = scene.add
         .text(0, 0, '', textStyle({ font: 'display', size: 34 * uiScale, weight: '900', color: CSS.success, glow: CSS.success, glowBlur: 10 }))
         .setOrigin(0.5)
@@ -44,6 +45,7 @@ export class FeedbackLayer {
     });
     this.successBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.success)).setDepth(DEPTH.feedback);
     this.failBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.danger)).setDepth(DEPTH.feedback);
+    this.goldenBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.gold)).setDepth(DEPTH.feedback);
   }
 
   popup(x: number, y: number, message: string, color: string): void {
@@ -94,6 +96,11 @@ export class FeedbackLayer {
     (success ? this.successBurst : this.failBurst).explode(success ? 18 : 24, x, y);
   }
 
+  /** The golden parcel's own celebration. */
+  goldBurst(x: number, y: number): void {
+    this.goldenBurst.explode(36, x, y);
+  }
+
   destroy(): void {
     this.scene.tweens.killTweensOf([...this.popups, this.banner]);
     for (const text of this.popups) text.destroy();
@@ -101,5 +108,6 @@ export class FeedbackLayer {
     this.banner.destroy();
     this.successBurst.destroy();
     this.failBurst.destroy();
+    this.goldenBurst.destroy();
   }
 }

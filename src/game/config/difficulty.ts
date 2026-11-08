@@ -1,3 +1,37 @@
+import type { RuleMode } from '../../types/game';
+
+/**
+ * How pacing scales from shift to shift. Every value is bounded, so the
+ * endless game flattens out at a hard but reactable plateau.
+ */
+export interface DifficultyScaling {
+  /** Travel time of shift 1. */
+  readonly baseTravelMs: number;
+  /** Floor of the shift-driven travel time, before any per-mode allowance. */
+  readonly minTravelMs: number;
+  /** Multiplier applied to travel time for each shift reached. */
+  readonly travelFactorPerShift: number;
+  /** Extra time for rule modes that need more thought. */
+  readonly modeTravelAllowance: Readonly<Record<RuleMode, number>>;
+  /** The decision time never drops below this, per mode. */
+  readonly minDecisionMs: Readonly<Record<RuleMode, number>>;
+  /** Gap between one parcel resolving and the next spawning, in shift 1. */
+  readonly baseSpawnGapMs: number;
+  readonly minSpawnGapMs: number;
+  readonly spawnGapFactorPerShift: number;
+}
+
+export const DEFAULT_DIFFICULTY_SCALING: DifficultyScaling = {
+  baseTravelMs: 4200,
+  minTravelMs: 1500,
+  travelFactorPerShift: 0.94,
+  modeTravelAllowance: { COLOR: 1, SHAPE: 1, REVERSE: 1.03, COMBINATION: 1.08 },
+  minDecisionMs: { COLOR: 1500, SHAPE: 1500, REVERSE: 1700, COMBINATION: 2000 },
+  baseSpawnGapMs: 650,
+  minSpawnGapMs: 360,
+  spawnGapFactorPerShift: 0.96,
+};
+
 /**
  * Gameplay pacing. All times are in milliseconds.
  *

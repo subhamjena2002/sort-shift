@@ -31,7 +31,7 @@ export class GameOverScene extends Phaser.Scene {
   create(): void {
     const director = SceneDirector.from(this);
     const result = this.result;
-    const STACK_TOP = 318;
+    const STACK_TOP = 346;
     const frame = createOverlayFrame(this, COLORS.danger, STACK_TOP + buttonStackHeight(2) + OVERLAY_FOOTER);
     const top = frame.panelY - frame.panelHeight / 2;
     const s = frame.uiScale;
@@ -66,6 +66,11 @@ export class GameOverScene extends Phaser.Scene {
 
     this.add
       .text(cx, top + 276 * s, `PARCELS SORTED ${result.correctCount}   ·   HANDLED ${result.parcelsResolved}`, textStyle({ size: 18 * s, color: CSS.textDim, letterSpacing: 2 }))
+      .setOrigin(0.5)
+      .setDepth(DEPTH.overlay);
+
+    this.add
+      .text(cx, top + 306 * s, `SHIFT ${result.shiftReached ?? 1}   ·   BEST STREAK ${result.bestStreak ?? 0}   ·   PERFECT ${result.perfectShifts ?? 0}`, textStyle({ size: 18 * s, color: CSS.cyan, letterSpacing: 2 }))
       .setOrigin(0.5)
       .setDepth(DEPTH.overlay);
 

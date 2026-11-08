@@ -140,7 +140,7 @@ export class MenuScene extends Phaser.Scene {
     }
 
     this.add
-      .text(cx, top + L.controlsH - 14, 'Sort each parcel before it crosses the magenta line  ·  Touch: tap the buttons', textStyle({ size: 16 * L.uiScale, color: CSS.textDim, align: 'center', letterSpacing: 1 }))
+      .text(cx, top + L.controlsH - 14, 'The sorting rule changes every shift. Follow the rule card and sort before the magenta line.', textStyle({ size: 16 * L.uiScale, color: CSS.textDim, align: 'center', letterSpacing: 1 }))
       .setOrigin(0.5, 1)
       .setWordWrapWidth(L.controlsW - 40)
       .setDepth(DEPTH.hud);

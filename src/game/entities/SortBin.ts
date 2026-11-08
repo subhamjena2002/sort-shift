@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import type { BinSide } from '../../types/game';
-import type { ParcelColorDefinition } from '../data/parcelCatalog';
+import { createGlyphRow } from '../ui/GlyphRow';
 import type { Box, Point } from '../ui/layout';
 import { drawPanel } from '../ui/Panel';
+import type { RuleGlyph } from '../ui/ruleGlyphs';
 import { COLORS, CSS, DEPTH, textStyle } from '../ui/theme';
 
 /**
@@ -14,10 +15,14 @@ export class SortBin {
   private readonly box: Box;
   private readonly container: Phaser.GameObjects.Container;
   private readonly flashLayer: Phaser.GameObjects.Graphics;
+  private readonly chipY: number;
+  private readonly uiScale: number;
+  private acceptsRow: Phaser.GameObjects.Container | null = null;
 
-  constructor(scene: Phaser.Scene, box: Box, side: BinSide, accepts: readonly ParcelColorDefinition[], uiScale: number) {
+  constructor(scene: Phaser.Scene, box: Box, side: BinSide, accepts: readonly RuleGlyph[], uiScale: number) {
     this.scene = scene;
     this.box = box;
+    this.uiScale = uiScale;
     const w = box.width;
     const h = box.height;
 
@@ -52,33 +57,23 @@ export class SortBin {
       textStyle({ font: 'display', size: 22 * uiScale, weight: '900', color: CSS.white, letterSpacing: 3 }),
     ).setOrigin(0.5, 0);
 
-    // "Accepts" chips derived from the active rule.
-    const chips = new Phaser.GameObjects.Graphics(scene);
-    const chipTexts: Phaser.GameObjects.Text[] = [];
-    const chipY = title.y + title.height + 8;
-    const chipSize = 16 * uiScale;
-    let totalW = 0;
-    const entries = accepts.map((def) => {
-      const text = new Phaser.GameObjects.Text(scene, 0, chipY, def.label, textStyle({ size: 18 * uiScale, color: def.css, letterSpacing: 2 })).setOrigin(0, 0.5);
-      chipTexts.push(text);
-      const width = chipSize + 6 + text.width;
-      totalW += width;
-      return { def, text, width };
-    });
-    totalW += Math.max(0, entries.length - 1) * 14;
-    let cx = -totalW / 2;
-    for (const entry of entries) {
-      chips.fillStyle(entry.def.fill, 1);
-      chips.fillRoundedRect(cx, chipY - chipSize / 2, chipSize, chipSize, 4);
-      entry.text.setX(cx + chipSize + 6);
-      cx += entry.width + 14;
-    }
-
+    this.chipY = title.y + title.height + 12;
     this.flashLayer = new Phaser.GameObjects.Graphics(scene).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
 
-    this.container = scene.add
-      .container(box.x, box.y, [g, title, chips, ...chipTexts, this.flashLayer])
-      .setDepth(DEPTH.bins);
+    this.container = scene.add.container(box.x, box.y, [g, title, this.flashLayer]).setDepth(DEPTH.bins);
+    this.setAccepts(accepts);
+  }
+
+  /** Replace the "accepts" chips with those of the active rule. */
+  setAccepts(accepts: readonly RuleGlyph[]): void {
+    this.acceptsRow?.destroy();
+    const s = this.uiScale;
+    const row = createGlyphRow(this.scene, accepts, { iconSize: 16 * s, fontSize: 15 * s, gap: 12 * s });
+    row.container.setY(this.chipY);
+    const maxWidth = this.box.width - 24;
+    if (row.width > maxWidth) row.container.setScale(maxWidth / row.width);
+    this.acceptsRow = row.container;
+    this.container.addAt(row.container, 2);
   }
 
   /** Where a sorted parcel should travel to. */

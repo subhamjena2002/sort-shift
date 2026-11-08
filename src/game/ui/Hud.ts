@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
 import type { BinSide } from '../../types/game';
-import { PARCEL_COLORS } from '../data/parcelCatalog';
-import type { RuleClause, SortingRule } from '../data/sortingRules';
-import type { GameLayout } from './layout';
+import { MODE_LABELS, type SortingRule } from '../data/sortingRules';
+import type { ShiftPlan } from '../systems/ShiftManager';
+import { createGlyphRow } from './GlyphRow';
+import type { GameLayout, Point } from './layout';
 import { NeonButton } from './NeonButton';
 import { drawArrow, drawPanel } from './Panel';
+import { glyphsForSide } from './ruleGlyphs';
 import { TEXTURES } from './textures';
 import { COLORS, CSS, DEPTH, textStyle } from './theme';
 
@@ -15,9 +17,12 @@ export interface HudOptions {
   readonly onPause: () => void;
 }
 
-const SIDE_LABEL: Readonly<Record<BinSide, string>> = { LEFT: 'LEFT', RIGHT: 'RIGHT' };
+const SPEED_SEGMENTS = 8;
 
-/** Score, best, speed, mistakes-remaining pips, the active rule and pause button. */
+/**
+ * Score, best, mistakes-remaining pips, the active rule, the streak readout,
+ * shift progress, speed and the pause button.
+ */
 export class Hud {
   private readonly scene: Phaser.Scene;
   private readonly layout: GameLayout;
@@ -28,8 +33,18 @@ export class Hud {
   private readonly pips: Phaser.GameObjects.Graphics;
   private readonly pipFlash: Phaser.GameObjects.Image;
   private readonly pauseButton: NeonButton;
+  private readonly ruleTitle: Phaser.GameObjects.Text;
+  private ruleRows: Phaser.GameObjects.Container[] = [];
+  private readonly streakText: Phaser.GameObjects.Text;
+  private readonly multiplierText: Phaser.GameObjects.Text;
+  private readonly comboBar: Phaser.GameObjects.Graphics;
+  private readonly comboCallout: Phaser.GameObjects.Text;
+  private readonly shiftText: Phaser.GameObjects.Text;
+  private readonly modeText: Phaser.GameObjects.Text;
+  private readonly quotaText: Phaser.GameObjects.Text;
+  private readonly speedText: Phaser.GameObjects.Text;
+  private readonly shiftBars: Phaser.GameObjects.Graphics;
   private bestScore: number;
-  private speedLevel = 1;
   private remaining: number;
 
   constructor(scene: Phaser.Scene, layout: GameLayout, options: HudOptions) {
@@ -66,7 +81,66 @@ export class Hud {
       .setDepth(DEPTH.hud);
     this.objects.push(mistakesLabel, this.pips, this.pipFlash);
 
-    this.buildRulePanel(options.rule);
+    // Rule panel (always visible, above the belt).
+    const box = layout.rulePanel;
+    const ruleFrame = scene.add.graphics().setDepth(DEPTH.hud);
+    drawPanel(ruleFrame, box.x, box.y, box.width, box.height, { accent: COLORS.magenta, radius: 14 });
+    ruleFrame.lineStyle(2, COLORS.panelEdge, 1);
+    ruleFrame.lineBetween(box.x, box.y - box.height / 2 + 34 * s, box.x, box.y + box.height / 2 - 12 * s);
+    this.ruleTitle = scene.add
+      .text(box.x, box.y - box.height / 2 + 8 * s, '', textStyle({ size: 16 * s, color: CSS.magenta, letterSpacing: 5 }))
+      .setOrigin(0.5, 0)
+      .setDepth(DEPTH.hud);
+    this.objects.push(ruleFrame, this.ruleTitle);
+
+    // Streak panel.
+    const combo = layout.comboPanel;
+    const comboLeft = combo.x - combo.width / 2 + 14;
+    const comboTop = combo.y - combo.height / 2;
+    const comboFrame = scene.add.graphics().setDepth(DEPTH.hud);
+    drawPanel(comboFrame, combo.x, combo.y, combo.width, combo.height, { accent: COLORS.amber, radius: 14, glow: false });
+    const streakLabel = scene.add
+      .text(comboLeft, comboTop + 10, 'STREAK', textStyle({ size: 16 * s, color: CSS.amber, letterSpacing: 4 }))
+      .setDepth(DEPTH.hud);
+    this.streakText = scene.add
+      .text(comboLeft, comboTop + 34 * s, '0', textStyle({ font: 'display', size: 42 * s, weight: '900', color: CSS.white }))
+      .setDepth(DEPTH.hud);
+    this.multiplierText = scene.add
+      .text(combo.x + combo.width / 2 - 14, comboTop + 62 * s, '×1', textStyle({ font: 'display', size: 34 * s, weight: '900', color: CSS.textDim, align: 'right' }))
+      .setOrigin(1, 0.5)
+      .setDepth(DEPTH.hud);
+    this.comboBar = scene.add.graphics().setDepth(DEPTH.hud);
+    this.comboCallout = scene.add
+      .text(combo.x + combo.width / 2 - 14, comboTop + 10, '', textStyle({ size: 16 * s, color: CSS.amber, letterSpacing: 1, align: 'right' }))
+      .setOrigin(1, 0)
+      .setAlpha(0)
+      .setDepth(DEPTH.hud);
+    this.objects.push(comboFrame, streakLabel, this.streakText, this.multiplierText, this.comboBar, this.comboCallout);
+
+    // Shift panel.
+    const shift = layout.shiftPanel;
+    const shiftLeft = shift.x - shift.width / 2 + 14;
+    const shiftRight = shift.x + shift.width / 2 - 14;
+    const shiftTop = shift.y - shift.height / 2;
+    const shiftFrame = scene.add.graphics().setDepth(DEPTH.hud);
+    drawPanel(shiftFrame, shift.x, shift.y, shift.width, shift.height, { accent: COLORS.cyan, radius: 14, glow: false });
+    this.shiftText = scene.add
+      .text(shiftLeft, shiftTop + 8, 'SHIFT 1', textStyle({ font: 'display', size: 26 * s, weight: '900', color: CSS.white, letterSpacing: 2 }))
+      .setDepth(DEPTH.hud);
+    this.modeText = scene.add
+      .text(shiftLeft, shiftTop + 46 * s, '', textStyle({ size: 17 * s, color: CSS.cyan, letterSpacing: 2 }))
+      .setDepth(DEPTH.hud);
+    this.quotaText = scene.add
+      .text(shiftRight, shiftTop + 46 * s, '', textStyle({ size: 17 * s, color: CSS.text, align: 'right' }))
+      .setOrigin(1, 0)
+      .setDepth(DEPTH.hud);
+    this.speedText = scene.add
+      .text(shiftLeft, shiftTop + 92 * s, '', textStyle({ size: 15 * s, color: CSS.textDim, letterSpacing: 1 }))
+      .setDepth(DEPTH.hud);
+    this.shiftBars = scene.add.graphics().setDepth(DEPTH.hud);
+    this.objects.push(shiftFrame, this.shiftText, this.modeText, this.quotaText, this.speedText, this.shiftBars);
+
+    this.setRule(options.rule, false);
 
     const pb = layout.pauseButton;
     this.pauseButton = new NeonButton(scene, {
@@ -85,6 +159,19 @@ export class Hud {
 
     this.drawPips();
     this.refreshMeta();
+    this.setCombo(0, 1, 5, false);
+  }
+
+  /** Brief message in the streak panel's title row, clear of its numbers. */
+  showComboCallout(message: string, color: string): void {
+    this.scene.tweens.killTweensOf(this.comboCallout);
+    this.comboCallout.setText(message).setColor(color).setAlpha(1);
+    this.scene.tweens.add({ targets: this.comboCallout, alpha: 0, delay: 650, duration: 300 });
+  }
+
+  /** Where score bonus call-outs should appear. */
+  get scoreAnchor(): Point {
+    return { x: this.layout.score.x + 170, y: this.layout.score.y + 50 };
   }
 
   setScore(score: number, animate: boolean): void {
@@ -99,12 +186,6 @@ export class Hud {
     this.scene.tweens.add({ targets: this.scoreText, scale: 1, duration: 220, ease: 'Back.easeOut' });
   }
 
-  setSpeedLevel(level: number): void {
-    if (level === this.speedLevel) return;
-    this.speedLevel = level;
-    this.refreshMeta();
-  }
-
   setMistakesRemaining(remaining: number, animate: boolean): void {
     const lostIndex = this.remaining - 1;
     this.remaining = Math.max(0, remaining);
@@ -116,6 +197,78 @@ export class Hud {
     this.scene.tweens.add({ targets: this.pipFlash, scale: 1.6, alpha: 0, duration: 520, ease: 'Cubic.easeOut' });
   }
 
+  /** Show the mappings of `rule`, with LEFT on the left and RIGHT on the right. */
+  setRule(rule: SortingRule, animate: boolean): void {
+    this.scene.tweens.killTweensOf(this.ruleRows);
+    for (const row of this.ruleRows) row.destroy();
+    this.ruleTitle.setText(rule.title);
+
+    const box = this.layout.rulePanel;
+    const rowY = box.y + 14 * this.layout.uiScale;
+    const quarter = box.width / 4;
+    const maxWidth = box.width / 2 - 28 * this.layout.uiScale;
+    this.ruleRows = [
+      this.buildRuleSide(rule, 'LEFT', box.x - quarter, rowY, maxWidth),
+      this.buildRuleSide(rule, 'RIGHT', box.x + quarter, rowY, maxWidth),
+    ];
+
+    if (!animate) return;
+    for (const row of this.ruleRows) {
+      const finalScale = row.scaleX;
+      row.setScale(finalScale * 0.6).setAlpha(0);
+      this.scene.tweens.add({ targets: row, scale: finalScale, alpha: 1, duration: 320, ease: 'Back.easeOut' });
+    }
+  }
+
+  setCombo(streak: number, multiplier: number, nextTierAt: number | null, animate: boolean): void {
+    this.streakText.setText(String(streak));
+    this.multiplierText.setText(`×${multiplier}`).setColor(multiplier > 1 ? CSS.amber : CSS.textDim);
+
+    const box = this.layout.comboPanel;
+    const s = this.layout.uiScale;
+    const fraction = nextTierAt === null ? 1 : Math.min(1, streak / nextTierAt);
+    drawBar(this.comboBar, box.x - box.width / 2 + 14, box.y + box.height / 2 - 20 * s, box.width - 28, 10 * s, fraction, COLORS.amber);
+
+    if (!animate) return;
+    this.scene.tweens.killTweensOf([this.streakText, this.multiplierText]);
+    this.streakText.setScale(1);
+    this.multiplierText.setScale(1);
+    this.scene.tweens.add({ targets: [this.streakText, this.multiplierText], scale: 1.2, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+  }
+
+  setShift(plan: ShiftPlan, correctInShift: number): void {
+    this.shiftText.setText(`SHIFT ${plan.number}`);
+    this.quotaText.setText(`${Math.min(correctInShift, plan.quota)}/${plan.quota}`);
+    this.speedText.setText(`SPEED ${plan.difficulty.speedLevel}`);
+
+    const box = this.layout.shiftPanel;
+    const s = this.layout.uiScale;
+    const left = box.x - box.width / 2 + 14;
+    const top = box.y - box.height / 2;
+    const width = box.width - 28;
+
+    // Long mode names shrink so they never run into the quota counter.
+    this.modeText.setScale(1).setText(MODE_LABELS[plan.mode]);
+    const modeRoom = width - this.quotaText.width - 8;
+    if (this.modeText.width > modeRoom) this.modeText.setScale(modeRoom / this.modeText.width);
+
+    const g = this.shiftBars;
+    g.clear();
+    drawBar(g, left, top + 76 * s, width, 8 * s, correctInShift / plan.quota, COLORS.cyan, false);
+
+    // Speed gauge: a segment for each slice of the path to top speed.
+    const gaugeLeft = left + 74 * s;
+    const gaugeWidth = width - 74 * s;
+    const gap = 3;
+    const segment = (gaugeWidth - gap * (SPEED_SEGMENTS - 1)) / SPEED_SEGMENTS;
+    const lit = Math.max(1, Math.ceil(plan.difficulty.pressure * SPEED_SEGMENTS));
+    for (let i = 0; i < SPEED_SEGMENTS; i += 1) {
+      const hot = i >= SPEED_SEGMENTS - 2;
+      g.fillStyle(i < lit ? (hot ? COLORS.danger : COLORS.magenta) : COLORS.panelEdge, 1);
+      g.fillRect(gaugeLeft + i * (segment + gap), top + 96 * s, segment, 12 * s);
+    }
+  }
+
   setPauseEnabled(enabled: boolean): void {
     this.pauseButton.setEnabled(enabled);
   }
@@ -125,7 +278,9 @@ export class Hud {
   }
 
   destroy(): void {
-    this.scene.tweens.killTweensOf([this.scoreText, this.pipFlash]);
+    this.scene.tweens.killTweensOf([this.scoreText, this.pipFlash, this.streakText, this.multiplierText, this.comboCallout, ...this.ruleRows]);
+    for (const row of this.ruleRows) row.destroy();
+    this.ruleRows = [];
     for (const obj of this.objects) obj.destroy();
     this.objects.length = 0;
   }
@@ -133,7 +288,32 @@ export class Hud {
   // ------------------------------------------------------------- internals
 
   private refreshMeta(): void {
-    this.metaText.setText(`BEST ${this.bestScore}   ·   SPEED ${this.speedLevel}`);
+    this.metaText.setText(`BEST ${this.bestScore}`);
+  }
+
+  private buildRuleSide(rule: SortingRule, side: BinSide, x: number, y: number, maxWidth: number): Phaser.GameObjects.Container {
+    const s = this.layout.uiScale;
+    const arrowSize = 24 * s;
+    const pad = 8 * s;
+    const glyphs = createGlyphRow(this.scene, glyphsForSide(rule, side), { iconSize: 22 * s, fontSize: 22 * s, gap: 14 * s });
+    const label = new Phaser.GameObjects.Text(this.scene, 0, 0, side, textStyle({ font: 'display', size: 22 * s, weight: '900', color: CSS.white, letterSpacing: 1 })).setOrigin(0, 0.5);
+    const arrow = new Phaser.GameObjects.Graphics(this.scene);
+
+    const total = arrowSize + pad + label.width + pad * 2 + glyphs.width;
+    const start = -total / 2;
+    if (side === 'LEFT') {
+      drawArrow(arrow, start + arrowSize / 2, 0, arrowSize, 'left', COLORS.white, 0.9);
+      label.setX(start + arrowSize + pad);
+      glyphs.container.setX(start + arrowSize + pad + label.width + pad * 2 + glyphs.width / 2);
+    } else {
+      glyphs.container.setX(start + glyphs.width / 2);
+      label.setX(start + glyphs.width + pad * 2);
+      drawArrow(arrow, start + total - arrowSize / 2, 0, arrowSize, 'right', COLORS.white, 0.9);
+    }
+
+    const row = this.scene.add.container(x, y, [glyphs.container, label, arrow]).setDepth(DEPTH.hud);
+    if (total > maxWidth) row.setScale(maxWidth / total);
+    return row;
   }
 
   private pipPosition(index: number): { x: number; y: number } {
@@ -173,83 +353,17 @@ export class Hud {
       }
     }
   }
+}
 
-  private buildRulePanel(rule: SortingRule): void {
-    const box = this.layout.rulePanel;
-    const s = this.layout.uiScale;
-    const g = this.scene.add.graphics().setDepth(DEPTH.hud);
-    drawPanel(g, box.x, box.y, box.width, box.height, { accent: COLORS.magenta, radius: 14 });
-    this.objects.push(g);
-
-    const title = this.scene.add
-      .text(box.x, box.y - box.height / 2 + 8 * s, rule.title, textStyle({ size: 16 * s, color: CSS.magenta, letterSpacing: 5 }))
-      .setOrigin(0.5, 0)
-      .setDepth(DEPTH.hud);
-    this.objects.push(title);
-
-    // Build each clause as [chip][COLOUR] ➜ [SIDE] inside a container (local
-    // coordinates, row centred on y=0), then centre and shrink-to-fit it.
-    const row = this.scene.add.container(box.x, box.y + 12 * s).setDepth(DEPTH.hud);
-    this.objects.push(row);
-    const rowY = 0;
-    const fontSize = 28 * s;
-    const chipSize = 24 * s;
-    const arrowSize = 30 * s;
-    const pad = 10 * s;
-    const clauseGap = 46 * s;
-
-    interface Part {
-      readonly width: number;
-      readonly place: (x: number) => void;
-    }
-    const parts: Part[] = [];
-    const icons = new Phaser.GameObjects.Graphics(this.scene);
-    row.add(icons);
-
-    rule.clauses.forEach((clause, index) => {
-      if (index > 0) {
-        parts.push({
-          width: clauseGap,
-          place: (x) => {
-            icons.lineStyle(2, COLORS.panelEdge, 1);
-            icons.lineBetween(x + clauseGap / 2, rowY - 18 * s, x + clauseGap / 2, rowY + 18 * s);
-          },
-        });
-      }
-      const { label, css, color } = describeClause(clause);
-      if (color !== null) {
-        parts.push({
-          width: chipSize + pad,
-          place: (x) => {
-            icons.fillStyle(color, 1);
-            icons.fillRoundedRect(x, rowY - chipSize / 2, chipSize, chipSize, 5);
-            icons.lineStyle(2, COLORS.white, 0.5);
-            icons.strokeRoundedRect(x, rowY - chipSize / 2, chipSize, chipSize, 5);
-          },
-        });
-      }
-      const colorText = new Phaser.GameObjects.Text(this.scene, 0, rowY, label, textStyle({ font: 'display', size: fontSize, weight: '900', color: css, letterSpacing: 1 }))
-        .setOrigin(0, 0.5);
-      row.add(colorText);
-      parts.push({ width: colorText.width + pad, place: (x) => colorText.setX(x) });
-      parts.push({
-        width: arrowSize + pad,
-        place: (x) => drawArrow(icons, x + arrowSize / 2, rowY, arrowSize, 'right', COLORS.white, 0.85),
-      });
-      const sideText = new Phaser.GameObjects.Text(this.scene, 0, rowY, SIDE_LABEL[clause.destination], textStyle({ font: 'display', size: fontSize, weight: '900', color: CSS.white, letterSpacing: 1 }))
-        .setOrigin(0, 0.5);
-      row.add(sideText);
-      parts.push({ width: sideText.width, place: (x) => sideText.setX(x) });
-    });
-
-    const total = parts.reduce((sum, part) => sum + part.width, 0);
-    let x = -total / 2;
-    for (const part of parts) {
-      part.place(x);
-      x += part.width;
-    }
-    const maxWidth = box.width - 48 * s;
-    if (total > maxWidth) row.setScale(maxWidth / total);
+/** Horizontal progress bar with its top-left corner at (x, y). */
+function drawBar(g: Phaser.GameObjects.Graphics, x: number, y: number, width: number, height: number, fraction: number, color: number, clear = true): void {
+  if (clear) g.clear();
+  g.fillStyle(COLORS.panelEdge, 1);
+  g.fillRoundedRect(x, y, width, height, height / 2);
+  const filled = width * Math.max(0, Math.min(1, fraction));
+  if (filled >= height) {
+    g.fillStyle(color, 1);
+    g.fillRoundedRect(x, y, filled, height, height / 2);
   }
 }
 
@@ -260,19 +374,4 @@ function diamondPath(g: Phaser.GameObjects.Graphics, x: number, y: number, half:
   g.lineTo(x, y + half);
   g.lineTo(x - half, y);
   g.closePath();
-}
-
-interface ClauseDescription {
-  readonly label: string;
-  readonly css: string;
-  readonly color: number | null;
-}
-
-function describeClause(clause: RuleClause): ClauseDescription {
-  const colorId = clause.when.color;
-  if (colorId !== undefined) {
-    const def = PARCEL_COLORS[colorId];
-    return { label: def.label, css: def.css, color: def.fill };
-  }
-  return { label: 'ANY', css: CSS.white, color: null };
 }
