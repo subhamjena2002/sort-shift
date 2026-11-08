@@ -1,0 +1,30 @@
+/* Page shell only — everything inside the canvas is drawn by Phaser. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050b1a;
+  /* Stop the browser from scrolling, zooming or highlighting on touch. */
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#game-root {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  background: radial-gradient(ellipse at center, #0a1630 0%, #050b1a 70%);
+}
+
+#game-root canvas {
+  display: block;
+  outline: none;
+}

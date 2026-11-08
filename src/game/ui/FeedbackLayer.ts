@@ -1,0 +1,105 @@
+import Phaser from 'phaser';
+import { TEXTURES } from './textures';
+import { COLORS, CSS, DEPTH, textStyle } from './theme';
+
+/**
+ * Transient feedback: floating "+10"/"MISS" popups (pooled), a centre banner
+ * and particle bursts. Everything is reused, nothing is created per event
+ * except tweens.
+ */
+export class FeedbackLayer {
+  private readonly scene: Phaser.Scene;
+  private readonly popups: Phaser.GameObjects.Text[] = [];
+  private readonly banner: Phaser.GameObjects.Text;
+  private readonly successBurst: Phaser.GameObjects.Particles.ParticleEmitter;
+  private readonly failBurst: Phaser.GameObjects.Particles.ParticleEmitter;
+  private nextPopup = 0;
+
+  constructor(scene: Phaser.Scene, bannerX: number, bannerY: number, uiScale: number) {
+    this.scene = scene;
+    for (let i = 0; i < 4; i += 1) {
+      const text = scene.add
+        .text(0, 0, '', textStyle({ font: 'display', size: 34 * uiScale, weight: '900', color: CSS.success, glow: CSS.success, glowBlur: 10 }))
+        .setOrigin(0.5)
+        .setDepth(DEPTH.feedback)
+        .setVisible(false);
+      this.popups.push(text);
+    }
+    this.banner = scene.add
+      .text(bannerX, bannerY, '', textStyle({ font: 'display', size: 46 * uiScale, weight: '900', color: CSS.white, glow: CSS.cyan, glowBlur: 18, align: 'center', letterSpacing: 4 }))
+      .setOrigin(0.5)
+      .setDepth(DEPTH.feedback)
+      .setVisible(false);
+
+    const burstConfig = (tint: number): Phaser.Types.GameObjects.Particles.ParticleEmitterConfig => ({
+      speed: { min: 120, max: 360 },
+      angle: { min: 0, max: 360 },
+      lifespan: { min: 380, max: 680 },
+      scale: { start: 1.1, end: 0 },
+      alpha: { start: 1, end: 0 },
+      rotate: { min: 0, max: 360 },
+      blendMode: Phaser.BlendModes.ADD,
+      tint,
+      emitting: false,
+    });
+    this.successBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.success)).setDepth(DEPTH.feedback);
+    this.failBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.danger)).setDepth(DEPTH.feedback);
+  }
+
+  popup(x: number, y: number, message: string, color: string): void {
+    const text = this.popups[this.nextPopup];
+    this.nextPopup = (this.nextPopup + 1) % this.popups.length;
+    if (!text) return;
+    this.scene.tweens.killTweensOf(text);
+    text
+      .setText(message)
+      .setColor(color)
+      .setShadow(0, 0, color, 10, true, true)
+      .setPosition(x, y)
+      .setAlpha(1)
+      .setScale(0.6)
+      .setVisible(true);
+    this.scene.tweens.add({ targets: text, scale: 1, duration: 160, ease: 'Back.easeOut' });
+    this.scene.tweens.add({
+      targets: text,
+      y: y - 70,
+      alpha: 0,
+      delay: 260,
+      duration: 520,
+      ease: 'Cubic.easeIn',
+      onComplete: () => text.setVisible(false),
+    });
+  }
+
+  showBanner(message: string, color: string, holdMs = 700): void {
+    this.scene.tweens.killTweensOf(this.banner);
+    this.banner
+      .setText(message)
+      .setColor(color)
+      .setShadow(0, 0, color, 18, true, true)
+      .setAlpha(0)
+      .setScale(0.8)
+      .setVisible(true);
+    this.scene.tweens.add({ targets: this.banner, alpha: 1, scale: 1, duration: 220, ease: 'Back.easeOut' });
+    this.scene.tweens.add({
+      targets: this.banner,
+      alpha: 0,
+      delay: 220 + holdMs,
+      duration: 260,
+      onComplete: () => this.banner.setVisible(false),
+    });
+  }
+
+  burst(x: number, y: number, success: boolean): void {
+    (success ? this.successBurst : this.failBurst).explode(success ? 18 : 24, x, y);
+  }
+
+  destroy(): void {
+    this.scene.tweens.killTweensOf([...this.popups, this.banner]);
+    for (const text of this.popups) text.destroy();
+    this.popups.length = 0;
+    this.banner.destroy();
+    this.successBurst.destroy();
+    this.failBurst.destroy();
+  }
+}
