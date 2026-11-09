@@ -1,11 +1,13 @@
 /** Abstract player intents, decoupled from the physical inputs that cause them. */
-export type PlayerIntent = 'LEFT' | 'RIGHT' | 'PAUSE';
+export type PlayerIntent = 'LEFT' | 'RIGHT' | 'PAUSE' | 'READY' | 'MUTE';
 
 /** Phaser key names (see Phaser.Input.Keyboard.KeyCodes) mapped to intents. */
 export const GAMEPLAY_KEY_BINDINGS: Readonly<Record<PlayerIntent, readonly string[]>> = {
   LEFT: ['LEFT', 'A'],
   RIGHT: ['RIGHT', 'D'],
   PAUSE: ['ESC', 'P'],
+  READY: ['ENTER', 'SPACE'],
+  MUTE: ['N'],
 };
 
 /** Returns the intent bound to a key name, if any. */

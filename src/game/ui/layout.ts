@@ -46,16 +46,21 @@ export interface GameLayout {
   readonly uiScale: number;
   /** Top-left anchor of the score block. */
   readonly score: Point;
+  readonly scorePanel: Box;
   /** Top-right anchor of the mistakes block. */
   readonly mistakes: Point;
+  readonly mistakesPanel: Box;
   readonly pauseButton: Box;
+  readonly muteButton: Box;
   readonly rulePanel: Box;
   /** Streak and multiplier readout. */
   readonly comboPanel: Box;
   /** Shift number, mode, quota progress and speed readout. */
   readonly shiftPanel: Box;
-  /** Card shown while a new shift is announced. */
+  /** Full rule card shown while a new shift is announced. */
   readonly announcement: Box;
+  /** Centre of the 3-2-1 countdown. */
+  readonly countdown: Point;
   readonly belt: BeltLayout;
   readonly bins: Readonly<Record<BinSide, Box>>;
   readonly buttons: Readonly<Record<BinSide, Box>>;
@@ -98,13 +103,17 @@ function landscape(width: number, height: number, zoneStart: number): GameLayout
     height,
     orientation: 'landscape',
     uiScale: 1,
-    score: { x: 40, y: 26 },
-    mistakes: { x: width - 128, y: 26 },
+    score: { x: 36, y: 16 },
+    scorePanel: { x: 160, y: 72, width: 280, height: 124 },
+    mistakes: { x: width - 122, y: 20 },
+    mistakesPanel: { x: width - 208, y: 72, width: 196, height: 124 },
     pauseButton: { x: width - 62, y: 58, width: 72, height: 72 },
+    muteButton: { x: width - 62, y: 144, width: 64, height: 64 },
     rulePanel: { x: cx, y: 54, width: 620, height: 88 },
     comboPanel: { x: cx - binOffset, y: 232, width: 210, height: 130 },
     shiftPanel: { x: cx + binOffset, y: 232, width: 210, height: 130 },
-    announcement: { x: cx, y: 368, width: 760, height: 430 },
+    announcement: { x: cx, y: 360, width: 1060, height: 696 },
+    countdown: { x: cx, y: 372 },
     belt: belt(cx, 196, 144, 560, 646, 700, 104, zoneStart),
     bins: {
       LEFT: { x: cx - binOffset, y: 440, width: 250, height: 212 },
@@ -125,13 +134,17 @@ function portrait(width: number, height: number, zoneStart: number): GameLayout 
     height,
     orientation: 'portrait',
     uiScale: 1.15,
-    score: { x: 34, y: 34 },
-    mistakes: { x: width - 128, y: 34 },
+    score: { x: 36, y: 14 },
+    scorePanel: { x: 174, y: 74, width: 308, height: 132 },
+    mistakes: { x: 518, y: 18 },
+    mistakesPanel: { x: 430, y: 74, width: 200, height: 132 },
     pauseButton: { x: width - 62, y: 72, width: 80, height: 80 },
+    muteButton: { x: width - 146, y: 72, width: 72, height: 72 },
     rulePanel: { x: cx, y: 224, width: 648, height: 112 },
     comboPanel: { x: 122, y: 460, width: 196, height: 150 },
     shiftPanel: { x: width - 122, y: 460, width: 196, height: 150 },
-    announcement: { x: cx, y: 600, width: 668, height: 500 },
+    announcement: { x: cx, y: 696, width: 688, height: 1152 },
+    countdown: { x: cx, y: 600 },
     belt: belt(cx, 200, 322, 880, 962, 1016, 108, zoneStart),
     bins: {
       LEFT: { x: 126, y: 740, width: 204, height: 236 },

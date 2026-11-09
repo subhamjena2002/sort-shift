@@ -12,10 +12,9 @@ export const TEST_PROGRESSION: ProgressionConfig = {
   transition: {
     openingMs: 100,
     settleMs: 200,
-    announceMs: 300,
-    learnMs: 400,
-    learnPerExtraClauseMs: 50,
-    warningMs: 150,
+    countdownLeadMs: 50,
+    countdownStepMs: 100,
+    countdownFrom: 3,
     readyDelayMs: 100,
   },
 };
@@ -42,8 +41,21 @@ export function stepUntil(session: RunSession, done: (events: readonly SessionEv
   throw new Error('Condition not reached within the time limit');
 }
 
+/** One frame of a player who confirms every announcement straight away. */
+export function tick(session: RunSession, stepMs = STEP_MS): SessionEvent[] {
+  const events = session.update(stepMs);
+  if (session.transition?.stage === 'ANNOUNCING') events.push(...session.confirmReady());
+  return events;
+}
+
 export function stepUntilSpawn(session: RunSession): SessionEvent[] {
-  return stepUntil(session, (events) => events.some((e) => e.type === 'PARCEL_SPAWNED'));
+  const seen: SessionEvent[] = [];
+  for (let t = 0; t < 60_000; t += STEP_MS) {
+    const batch = tick(session);
+    seen.push(...batch);
+    if (batch.some((e) => e.type === 'PARCEL_SPAWNED')) return seen;
+  }
+  throw new Error('No parcel spawned within the time limit');
 }
 
 export function correctSide(session: RunSession): BinSide {
@@ -69,7 +81,7 @@ export function clearShift(session: RunSession): SessionEvent[] {
   return events;
 }
 
-/** Clear shifts until the given shift number is in play and its belt is running. */
+/** Clear shifts until the given shift number is being announced. */
 export function playToShift(session: RunSession, shiftNumber: number): void {
   while (true) {
     const status = session.shiftStatus;

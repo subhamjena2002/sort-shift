@@ -70,7 +70,7 @@ export class SortBin {
     const s = this.uiScale;
     const row = createGlyphRow(this.scene, accepts, { iconSize: 16 * s, fontSize: 15 * s, gap: 12 * s });
     row.container.setY(this.chipY);
-    const maxWidth = this.box.width - 24;
+    const maxWidth = this.box.width - 56; // clear of the panel's corner brackets
     if (row.width > maxWidth) row.container.setScale(maxWidth / row.width);
     this.acceptsRow = row.container;
     this.container.addAt(row.container, 2);
@@ -92,9 +92,14 @@ export class SortBin {
 
     this.scene.tweens.killTweensOf([this.flashLayer, this.container]);
     this.flashLayer.setAlpha(1);
-    this.container.setScale(1);
+    this.container.setScale(1).setX(this.box.x);
     this.scene.tweens.add({ targets: this.flashLayer, alpha: 0, duration: 480, ease: 'Cubic.easeOut' });
-    this.scene.tweens.add({ targets: this.container, scale: success ? 1.04 : 0.97, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+    if (success) {
+      this.scene.tweens.add({ targets: this.container, scale: 1.05, duration: 90, yoyo: true, ease: 'Quad.easeOut' });
+    } else {
+      // A hard side-to-side rattle reads as rejection, unlike the soft success pop.
+      this.scene.tweens.add({ targets: this.container, x: this.box.x + 9, duration: 45, yoyo: true, repeat: 3, ease: 'Sine.easeInOut' });
+    }
   }
 
   destroy(): void {

@@ -18,6 +18,7 @@ import { MistakeTracker } from './MistakeTracker';
 import { ParcelFactory } from './ParcelFactory';
 import { judgeSort, resolveDestination } from './RuleEvaluator';
 import { perfectShiftBonus, ScoreSystem } from './ScoreSystem';
+import type { ShiftBriefing } from './ShiftBriefing';
 import type { ShiftManager, ShiftPlan } from './ShiftManager';
 
 /**
@@ -62,7 +63,9 @@ export type SessionEvent =
   | { readonly type: 'COMBO_CHANGED'; readonly combo: ComboUpdate }
   | { readonly type: 'BONUS_AWARDED'; readonly kind: BonusKind; readonly points: number }
   | { readonly type: 'SHIFT_COMPLETED'; readonly shift: number; readonly perfect: boolean; readonly bonus: number }
-  | { readonly type: 'SHIFT_ANNOUNCED'; readonly plan: ShiftPlan; readonly durationMs: number; readonly opening: boolean }
+  | { readonly type: 'SHIFT_ANNOUNCED'; readonly plan: ShiftPlan; readonly briefing: ShiftBriefing; readonly opening: boolean }
+  | { readonly type: 'COUNTDOWN_STARTED'; readonly plan: ShiftPlan }
+  | { readonly type: 'COUNTDOWN_TICK'; readonly value: number }
   | { readonly type: 'SHIFT_STARTED'; readonly plan: ShiftPlan }
   | { readonly type: 'RUN_ENDED'; readonly stats: RunStats };
 
@@ -94,14 +97,21 @@ export interface ComboStatus {
   readonly nextTierAt: number | null;
 }
 
-export type TransitionStage = 'SETTLING' | 'ANNOUNCING';
+/**
+ * SETTLING   – the previous shift's last feedback plays out.
+ * ANNOUNCING – the new rule is on screen. No time passes here; it only ends
+ *              when the player confirms they are ready.
+ * COUNTDOWN  – 3, 2, 1 before the belt starts.
+ */
+export type TransitionStage = 'SETTLING' | 'ANNOUNCING' | 'COUNTDOWN';
 
 export interface TransitionStatus {
   readonly stage: TransitionStage;
   readonly plan: ShiftPlan;
+  readonly briefing: ShiftBriefing;
   readonly opening: boolean;
-  readonly remainingMs: number;
-  readonly durationMs: number;
+  /** The number on display during the countdown, else null. */
+  readonly countdownValue: number | null;
 }
 
 interface MutableActiveParcel {
@@ -114,7 +124,7 @@ interface MutableActiveParcel {
 interface MutableTransition {
   stage: TransitionStage;
   remainingMs: number;
-  durationMs: number;
+  countdownValue: number | null;
   readonly opening: boolean;
 }
 
@@ -182,9 +192,8 @@ export class RunSession {
       : null;
 
     if (this.shiftRun) {
-      const openingMs = this.shiftRun.shifts.timing.openingMs;
       this.currentPhase = 'TRANSITION';
-      this.transitionState = { stage: 'SETTLING', remainingMs: openingMs, durationMs: openingMs, opening: true };
+      this.transitionState = { stage: 'SETTLING', remainingMs: this.shiftRun.shifts.timing.openingMs, countdownValue: null, opening: true };
     }
   }
 
@@ -265,8 +274,9 @@ export class RunSession {
   /** The running shift change, or null outside of one. */
   get transition(): TransitionStatus | null {
     if (!this.shiftRun || !this.transitionState) return null;
-    const { stage, remainingMs, durationMs, opening } = this.transitionState;
-    return { stage, remainingMs, durationMs, opening, plan: this.shiftRun.shifts.plan };
+    const { stage, opening, countdownValue } = this.transitionState;
+    const { plan, briefing } = this.shiftRun.shifts;
+    return { stage, opening, countdownValue, plan, briefing };
   }
 
   get stats(): RunStats {
@@ -349,6 +359,19 @@ export class RunSession {
 
     this.finishResolution(events);
     return events;
+  }
+
+  /**
+   * The player has read the announcement. Starts the countdown once; any
+   * further call, or a call at any other time, changes nothing.
+   */
+  confirmReady(): SessionEvent[] {
+    const run = this.shiftRun;
+    const transition = this.transitionState;
+    if (!run || !transition || transition.stage !== 'ANNOUNCING') return [];
+    transition.stage = 'COUNTDOWN';
+    transition.remainingMs = run.shifts.timing.countdownLeadMs;
+    return [{ type: 'COUNTDOWN_STARTED', plan: run.shifts.plan }];
   }
 
   // ---------------------------------------------------------------- helpers
@@ -436,15 +459,17 @@ export class RunSession {
       events.push({ type: 'BONUS_AWARDED', kind: 'PERFECT_SHIFT', points: bonus });
       this.pushScoreChanged(events);
     }
-    const { settleMs } = run.shifts.timing;
     this.currentPhase = 'TRANSITION';
-    this.transitionState = { stage: 'SETTLING', remainingMs: settleMs, durationMs: settleMs, opening: false };
+    this.transitionState = { stage: 'SETTLING', remainingMs: run.shifts.timing.settleMs, countdownValue: null, opening: false };
   }
 
   private advanceTransition(deltaMs: number): SessionEvent[] {
     const run = this.shiftRun;
     const transition = this.transitionState;
     if (!run || !transition) return [];
+
+    // An announcement has no clock: only confirmReady() can end it.
+    if (transition.stage === 'ANNOUNCING') return [];
 
     transition.remainingMs -= deltaMs;
     if (transition.remainingMs > 0) return [];
@@ -454,16 +479,25 @@ export class RunSession {
         run.shifts.advance();
         run.golden.onShiftStart();
       }
-      const { plan } = run.shifts;
       transition.stage = 'ANNOUNCING';
-      transition.remainingMs = plan.announcementMs;
-      transition.durationMs = plan.announcementMs;
-      return [{ type: 'SHIFT_ANNOUNCED', plan, durationMs: plan.announcementMs, opening: transition.opening }];
+      return [{ type: 'SHIFT_ANNOUNCED', plan: run.shifts.plan, briefing: run.shifts.briefing, opening: transition.opening }];
+    }
+
+    return this.advanceCountdown(run, transition);
+  }
+
+  private advanceCountdown(run: ShiftRun, transition: MutableTransition): SessionEvent[] {
+    const { countdownFrom, countdownStepMs, readyDelayMs } = run.shifts.timing;
+    const next = transition.countdownValue === null ? countdownFrom : transition.countdownValue - 1;
+    if (next >= 1) {
+      transition.countdownValue = next;
+      transition.remainingMs = countdownStepMs;
+      return [{ type: 'COUNTDOWN_TICK', value: next }];
     }
 
     this.transitionState = null;
     this.currentPhase = 'WAITING';
-    this.waitRemainingMs = run.shifts.timing.readyDelayMs;
+    this.waitRemainingMs = readyDelayMs;
     return [{ type: 'SHIFT_STARTED', plan: run.shifts.plan }];
   }
 }

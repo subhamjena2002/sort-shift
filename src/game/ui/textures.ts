@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { ParcelColor } from '../../types/game';
 import { ALL_COLORS, ALL_SHAPES, PARCEL_COLORS, parcelTextureKey, type ParcelColorDefinition } from '../data/parcelCatalog';
 import { COLORS } from './theme';
 
@@ -19,6 +20,8 @@ export const TEXTURES = {
   rollerBar: 'roller-bar',
   beltStreaks: 'belt-streaks',
   railChase: 'rail-chase',
+  stampCorrect: 'stamp-correct',
+  stampWrong: 'stamp-wrong',
   spark: 'spark',
   glowDot: 'glow-dot',
 } as const;
@@ -37,6 +40,29 @@ function withGraphics(scene: Phaser.Scene, key: string, width: number, height: n
   draw(g);
   g.generateTexture(key, width, height);
   g.destroy();
+}
+
+/** A small symbol unique to each colour, so hue is never the only cue on a parcel. */
+function drawColorSymbol(g: Phaser.GameObjects.Graphics, color: ParcelColor, x: number, y: number): void {
+  const r = 10;
+  g.fillStyle(0x0b1022, 0.72);
+  g.lineStyle(4, 0x0b1022, 0.72);
+  switch (color) {
+    case 'BLUE':
+      for (let i = -1; i <= 1; i += 1) g.fillRect(x - r, y + i * 7 - 2, r * 2, 4);
+      break;
+    case 'RED':
+      g.lineBetween(x - r, y - r, x + r, y + r);
+      g.lineBetween(x + r, y - r, x - r, y + r);
+      break;
+    case 'YELLOW':
+      g.fillTriangle(x, y - r - 1, x + r + 1, y + r, x - r - 1, y + r);
+      break;
+    case 'GREEN':
+      g.fillRect(x - r, y - 2.5, r * 2, 5);
+      g.fillRect(x - 2.5, y - r, 5, r * 2);
+      break;
+  }
 }
 
 function drawParcel(g: Phaser.GameObjects.Graphics, def: ParcelColorDefinition): void {
@@ -86,6 +112,8 @@ function drawParcel(g: Phaser.GameObjects.Graphics, def: ParcelColorDefinition):
     g.fillRect(x, barY, w * 2, 16);
     x += w * 2 + 2;
   }
+
+  drawColorSymbol(g, def.id, s / 2, 34);
 }
 
 /** Round parcel. The silhouette alone tells it apart from a square one. */
@@ -121,6 +149,8 @@ function drawCircleParcel(g: Phaser.GameObjects.Graphics, def: ParcelColorDefini
     g.fillRect(x, c + 26, w * 2, 12);
     x += w * 2 + 2;
   }
+
+  drawColorSymbol(g, def.id, c, 32);
 }
 
 function starPath(g: Phaser.GameObjects.Graphics, x: number, y: number, outer: number, inner: number): void {
@@ -140,26 +170,48 @@ function starPath(g: Phaser.GameObjects.Graphics, x: number, y: number, outer: n
 function drawGoldRim(g: Phaser.GameObjects.Graphics, circle: boolean): void {
   const s = PARCEL_TEXTURE_SIZE;
   const c = s / 2;
-  g.lineStyle(9, COLORS.goldDeep, 1);
-  if (circle) g.strokeCircle(c, c, 58);
-  else g.strokeRoundedRect(6, 6, s - 12, s - 12, 14);
-  g.lineStyle(4, COLORS.gold, 1);
-  if (circle) g.strokeCircle(c, c, 58);
-  else g.strokeRoundedRect(6, 6, s - 12, s - 12, 14);
+  const ring = (width: number, color: number): void => {
+    g.lineStyle(width, color, 1);
+    if (circle) g.strokeCircle(c, c, 57);
+    else g.strokeRoundedRect(7, 7, s - 14, s - 14, 14);
+  };
+  // A dark band around the gold keeps the frame visible even on a yellow parcel.
+  ring(13, 0x2a1a00);
+  ring(8, COLORS.gold);
+  ring(2, COLORS.white);
 
-  g.fillStyle(COLORS.goldDeep, 1);
-  starPath(g, c, 22, 19, 9);
-  g.fillPath();
+  // Star badge in the corner, on a dark disc, clear of the label.
+  const badgeX = circle ? c + 42 : s - 24;
+  const badgeY = circle ? c - 42 : 24;
+  g.fillStyle(0x2a1a00, 1);
+  g.fillCircle(badgeX, badgeY, 21);
   g.fillStyle(COLORS.gold, 1);
-  starPath(g, c, 22, 14, 6.5);
+  starPath(g, badgeX, badgeY, 18, 8);
   g.fillPath();
+}
+
+function drawStamp(g: Phaser.GameObjects.Graphics, success: boolean): void {
+  const s = 96;
+  const c = s / 2;
+  g.fillStyle(0x050b1a, 0.85);
+  g.fillCircle(c, c, 44);
+  g.lineStyle(6, success ? COLORS.success : COLORS.danger, 1);
+  g.strokeCircle(c, c, 44);
+  g.lineStyle(11, success ? COLORS.success : COLORS.danger, 1);
+  if (success) {
+    g.lineBetween(26, 50, 42, 66);
+    g.lineBetween(42, 66, 72, 32);
+  } else {
+    g.lineBetween(31, 31, 65, 65);
+    g.lineBetween(65, 31, 31, 65);
+  }
 }
 
 function drawGoldRays(g: Phaser.GameObjects.Graphics): void {
   const s = PARCEL_TEXTURE_SIZE * 1.5;
   const c = s / 2;
   const rays = 10;
-  g.fillStyle(COLORS.gold, 0.55);
+  g.fillStyle(COLORS.gold, 0.8);
   for (let i = 0; i < rays; i += 1) {
     const angle = (Math.PI * 2 * i) / rays;
     const spread = Math.PI / rays / 2;
@@ -306,6 +358,8 @@ export function generateSharedTextures(scene: Phaser.Scene): void {
   withGraphics(scene, TEXTURES.rollerBar, 64, 16, drawRollerBar);
   withGraphics(scene, TEXTURES.beltStreaks, 64, 144, drawBeltStreaks);
   withGraphics(scene, TEXTURES.railChase, 6, 30, drawRailChase);
+  withGraphics(scene, TEXTURES.stampCorrect, 96, 96, (g) => drawStamp(g, true));
+  withGraphics(scene, TEXTURES.stampWrong, 96, 96, (g) => drawStamp(g, false));
   withGraphics(scene, TEXTURES.spark, 10, 10, drawSpark);
   withGraphics(scene, TEXTURES.glowDot, 64, 64, drawGlowDot);
 }

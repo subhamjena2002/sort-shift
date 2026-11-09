@@ -15,7 +15,13 @@ npm run dev        # http://localhost:5173
 npm test           # unit tests (Vitest)
 npm run build      # type-check + production build into dist/
 npm run preview    # serve the production build
+npm run verify:prod    # confirm dist/ contains no test hooks (after a build)
+npm run test:e2e       # Playwright browser tests
+npm run test:e2e:soak  # long-session checks (about 15 minutes)
 ```
+
+Browser tests need Chromium once: `npx playwright install chromium`. They run
+against `vite --mode e2e`, the only mode that loads the test bridge.
 
 ## Controls
 
@@ -24,6 +30,8 @@ npm run preview    # serve the production build
 | Left bin   | `←` or `A`      | LEFT button                |
 | Right bin  | `→` or `D`      | RIGHT button               |
 | Pause      | `Esc` or `P`    | Pause button (top right)   |
+| I'm ready  | `Enter`/`Space` | I'M READY button           |
+| Sound      | `N`             | Speaker button             |
 | Menus      | `Enter` / `Space` to play or restart, `R` restart, `M` menu |
 
 The game also pauses itself when the tab or window loses focus.
@@ -44,8 +52,9 @@ first (slowly rising to 15) and uses one rule mode, in a repeating cycle:
 | 4     | Combination | Blue circle or red square → left, the rest right |
 | 5+    | Repeats     | New mappings, a faster belt, a shorter gap      |
 
-- Before each shift the belt empties and a SHIFT CHANGE card shows the new
-  LEFT and RIGHT mappings during a short learning interval.
+- Before each shift the belt stops and a card shows the new LEFT and RIGHT
+  mappings. It stays until you press I'M READY (`Enter` / `Space`, click or
+  tap), then a 3-2-1 countdown starts the belt.
 - A parcel is always judged by the rule in force when it spawned.
 - Wrong bin or a parcel crossing the decision line unsorted: **1 mistake**.
   The third mistake ends the run. Best score is saved in `localStorage`.
@@ -110,6 +119,24 @@ public/assets/            Reserved for Blender-rendered images and audio
   a 720×1280 portrait layout to match the window, and scenes re-layout live.
 - **Placeholder art.** All art is generated at boot with Phaser Graphics
   (`ui/textures.ts`). Texture keys there are the swap points for Blender renders.
+
+## Playtest guide
+
+No human playtest has been recorded yet. Watch someone play without coaching,
+then note answers to these:
+
+- [ ] First-time understanding: could they say what to do after the first card?
+- [ ] Difficulty progression: where did it first feel hard, or unfair?
+- [ ] Rule-change clarity: could they say what changed at each new shift?
+- [ ] Reading time: did they ever feel rushed on a card?
+- [ ] I'M READY: did pressing it feel natural, on each input they used?
+- [ ] Countdown: too long, too short, or about right?
+- [ ] Combos: did building a streak feel satisfying?
+- [ ] Golden parcels: did they notice them, including on yellow parcels?
+- [ ] Mobile: are the buttons comfortable, with no mistaken taps?
+- [ ] Audio feedback: was each sound clear and not distracting?
+- [ ] Audio volume: comfortable at the default level?
+- [ ] Replayability: did they choose to play again?
 
 ## Fonts
 

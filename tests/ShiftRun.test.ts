@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_RULE } from '../src/game/data/sortingRules';
 import { GameStateMachine } from '../src/game/systems/GameStateMachine';
 import { destinationFor } from '../src/game/systems/RuleEvaluator';
 import { RunSession, type SessionEvent } from '../src/game/systems/RunSession';
@@ -16,6 +17,7 @@ import {
   stepUntil,
   stepUntilSpawn,
   TEST_PROGRESSION,
+  tick,
   wrongSide,
 } from './shiftHelpers';
 
@@ -39,31 +41,91 @@ function timeOf(session: RunSession, type: SessionEvent['type']): number {
   return elapsed;
 }
 
-describe('rule transition timing', () => {
-  const { openingMs, announceMs, learnMs, readyDelayMs, settleMs, warningMs } = TEST_PROGRESSION.transition;
+describe('player-controlled rule transitions', () => {
+  const { openingMs, readyDelayMs, settleMs, countdownLeadMs, countdownStepMs, countdownFrom } = TEST_PROGRESSION.transition;
+  const toAnnouncement = (session: RunSession): SessionEvent[] => stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_ANNOUNCED'));
 
-  it('announces shift 1, gives the learning interval, then starts spawning', () => {
+  it('announces shift 1, then counts down only after confirmation', () => {
     const session = makeShiftSession();
     expect(session.phase).toBe('TRANSITION');
     expect(timeOf(session, 'SHIFT_ANNOUNCED')).toBe(openingMs);
-    expect(timeOf(session, 'SHIFT_STARTED')).toBe(announceMs + learnMs);
+    expect(eventTypes(session.confirmReady())).toEqual(['COUNTDOWN_STARTED']);
+    expect(timeOf(session, 'COUNTDOWN_TICK')).toBe(countdownLeadMs);
+    expect(timeOf(session, 'SHIFT_STARTED')).toBe(countdownFrom * countdownStepMs);
     expect(session.phase).toBe('WAITING');
     expect(timeOf(session, 'PARCEL_SPAWNED')).toBe(readyDelayMs);
   });
 
-  it('spawns nothing and accepts no input during a transition', () => {
+  it('holds an announcement indefinitely with no timer behind it', () => {
     const session = makeShiftSession();
-    const events = stepUntil(session, (batch) => {
+    toAnnouncement(session);
+    const before = session.transition;
+    // Ten simulated minutes, then one enormous frame.
+    for (let i = 0; i < 60_000; i += 1) expect(session.update(STEP_MS)).toEqual([]);
+    expect(session.update(1e12)).toEqual([]);
+    expect(session.transition).toEqual(before);
+    expect(session.transition?.stage).toBe('ANNOUNCING');
+    expect(session.activeParcel).toBeNull();
+  });
+
+  it('allows no spawn, movement or sorting at any point of a transition', () => {
+    const session = makeShiftSession();
+    const check = (batch: readonly SessionEvent[]): void => {
       expect(session.activeParcel).toBeNull();
       expect(session.choose('LEFT')).toEqual([]);
+      expect(session.choose('RIGHT')).toEqual([]);
+      expect(eventTypes(batch)).not.toContain('PARCEL_SPAWNED');
+    };
+    stepUntil(session, (batch) => {
+      check(batch);
+      return batch.some((e) => e.type === 'SHIFT_ANNOUNCED');
+    });
+    check([]);
+    session.confirmReady();
+    stepUntil(session, (batch) => {
+      check(batch);
       return batch.some((e) => e.type === 'SHIFT_STARTED');
     });
-    expect(eventTypes(events)).not.toContain('PARCEL_SPAWNED');
     expect(session.score).toBe(0);
     expect(session.mistakes).toBe(0);
   });
 
-  it('runs settle, announcement and ready delay between shifts', () => {
+  it('starts exactly one countdown, however often readiness is confirmed', () => {
+    const session = makeShiftSession();
+    toAnnouncement(session);
+    expect(session.confirmReady()).toHaveLength(1);
+    for (let i = 0; i < 20; i += 1) expect(session.confirmReady()).toEqual([]);
+    const events = stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_STARTED'));
+    expect(eventTypes(events).filter((t) => t === 'COUNTDOWN_TICK')).toHaveLength(countdownFrom);
+  });
+
+  it('ignores confirmation outside an announcement', () => {
+    const session = makeShiftSession();
+    expect(session.confirmReady()).toEqual([]); // still settling
+    toAnnouncement(session);
+    session.confirmReady();
+    stepUntilSpawn(session);
+    expect(session.confirmReady()).toEqual([]); // parcel in play
+    expect(session.phase).toBe('ACTIVE');
+    const fixed = new RunSession({ rule: DEFAULT_RULE, random: createSeededRandom(1) });
+    expect(fixed.confirmReady()).toEqual([]);
+  });
+
+  it('counts 3, 2, 1 in order, reporting each value', () => {
+    const session = makeShiftSession();
+    toAnnouncement(session);
+    session.confirmReady();
+    const shown: number[] = [];
+    stepUntil(session, (batch) => {
+      for (const event of batch) if (event.type === 'COUNTDOWN_TICK') shown.push(event.value);
+      if (batch.some((e) => e.type === 'COUNTDOWN_TICK')) expect(session.transition?.countdownValue).toBe(shown.at(-1));
+      return batch.some((e) => e.type === 'SHIFT_STARTED');
+    });
+    expect(shown).toEqual([3, 2, 1]);
+    expect(session.transition).toBeNull();
+  });
+
+  it('runs settle, announcement and countdown between shifts', () => {
     const session = makeShiftSession();
     const sort = clearShift(session);
     expect(eventTypes(sort)).toContain('SHIFT_COMPLETED');
@@ -71,15 +133,27 @@ describe('rule transition timing', () => {
     expect(session.transition?.stage).toBe('SETTLING');
     expect(timeOf(session, 'SHIFT_ANNOUNCED')).toBe(settleMs);
     expect(session.transition?.stage).toBe('ANNOUNCING');
-    expect(timeOf(session, 'SHIFT_STARTED')).toBe(announceMs + learnMs);
+    session.confirmReady();
+    expect(timeOf(session, 'SHIFT_STARTED')).toBe(countdownLeadMs + countdownFrom * countdownStepMs);
     expect(timeOf(session, 'PARCEL_SPAWNED')).toBe(readyDelayMs);
   });
 
-  it('adds the warning time before a reversal', () => {
+  it('applies the new rule, not the old one, to the first parcel after a change', () => {
+    const session = makeShiftSession();
+    const oldRule = session.rule.id;
+    clearShift(session);
+    expect(session.rule.id).toBe(oldRule); // nothing changes until the card appears
+    toAnnouncement(session);
+    expect(session.rule.id).not.toBe(oldRule);
+    const events = stepUntilSpawn(session);
+    expect(firstEvent(events, 'PARCEL_SPAWNED').rule.id).toBe(session.rule.id);
+  });
+
+  it('carries a briefing with every announcement', () => {
     const session = makeShiftSession();
     playToShift(session, 3);
     expect(session.shiftStatus?.plan.mode).toBe('REVERSE');
-    expect(timeOf(session, 'SHIFT_STARTED')).toBe(warningMs + announceMs + learnMs);
+    expect(session.transition?.briefing).toMatchObject({ shiftLabel: 'SHIFT 03', warning: true, firstTime: true });
   });
 
   it('reports the opening announcement as such, and later ones as shift changes', () => {
@@ -89,15 +163,6 @@ describe('rule transition timing', () => {
     clearShift(session);
     const next = stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_ANNOUNCED'));
     expect(firstEvent(next, 'SHIFT_ANNOUNCED').opening).toBe(false);
-  });
-
-  it('counts down remaining announcement time', () => {
-    const session = makeShiftSession();
-    stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_ANNOUNCED'));
-    const before = session.transition?.remainingMs ?? 0;
-    session.update(100);
-    expect(session.transition?.remainingMs).toBe(before - 100);
-    expect(session.transition?.durationMs).toBe(announceMs + learnMs);
   });
 });
 
@@ -132,7 +197,7 @@ describe('rule consistency for parcels in play', () => {
     let previousRule = session.rule.id;
     let changes = 0;
     for (let frame = 0; frame < 60_000 && changes < 10; frame += 1) {
-      session.update(STEP_MS);
+      tick(session);
       if (session.rule.id !== previousRule) {
         changes += 1;
         previousRule = session.rule.id;
@@ -148,7 +213,7 @@ describe('rule consistency for parcels in play', () => {
     const session = makeShiftSession({ maxMistakes: 10_000 });
     let spawned = 0;
     for (let frame = 0; frame < 40_000; frame += 1) {
-      for (const event of session.update(STEP_MS)) {
+      for (const event of tick(session)) {
         if (event.type !== 'PARCEL_SPAWNED') continue;
         spawned += 1;
         expect(event.rule).toBe(session.rule);
@@ -210,7 +275,7 @@ describe('scoring in a shift run', () => {
     const play = (step: number): number => {
       const session = makeShiftSession({}, 99);
       while (session.correctCount < 12) {
-        session.update(step);
+        tick(session, step);
         if (session.activeParcel) session.choose(correctSide(session));
       }
       return session.score;
@@ -378,15 +443,43 @@ describe('pause and resume', () => {
     expect(session.activeParcel?.progress).toBeGreaterThan((before.active as { progress: number }).progress);
   });
 
-  it('freezes the shift announcement and the learning interval', () => {
+  it('resuming an announcement returns to the same announcement', () => {
     const session = makeShiftSession();
-    const machine = new GameStateMachine('PLAYING');
+    const machine = new GameStateMachine('SHIFT_ANNOUNCEMENT');
     stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_ANNOUNCED'));
-    session.update(120);
     const before = snapshot(session);
-    pauseFor(machine, () => undefined);
+    expect(machine.transition('PAUSED')).toBe(true);
+    expect(machine.transition('SHIFT_ANNOUNCEMENT')).toBe(true);
     expect(snapshot(session)).toEqual(before);
     expect(session.transition?.stage).toBe('ANNOUNCING');
+  });
+
+  it('a pause during the countdown neither restarts nor duplicates it', () => {
+    const session = makeShiftSession();
+    const machine = new GameStateMachine('COUNTDOWN');
+    stepUntil(session, (e) => e.some((x) => x.type === 'SHIFT_ANNOUNCED'));
+    session.confirmReady();
+    const shown: number[] = [];
+    const record = (batch: readonly SessionEvent[]): void => {
+      for (const event of batch) if (event.type === 'COUNTDOWN_TICK') shown.push(event.value);
+    };
+    stepUntil(session, (batch) => {
+      record(batch);
+      return shown.length === 2;
+    });
+    expect(session.transition?.countdownValue).toBe(2);
+
+    const before = snapshot(session);
+    expect(machine.transition('PAUSED')).toBe(true);
+    expect(session.confirmReady()).toEqual([]); // the Enter key while paused
+    expect(machine.transition('COUNTDOWN')).toBe(true);
+    expect(snapshot(session)).toEqual(before);
+
+    stepUntil(session, (batch) => {
+      record(batch);
+      return batch.some((e) => e.type === 'SHIFT_STARTED');
+    });
+    expect(shown).toEqual([3, 2, 1]);
   });
 
   it('a paused run plays out exactly like an uninterrupted one', () => {
@@ -396,7 +489,7 @@ describe('pause and resume', () => {
       const out: string[] = [];
       for (let frame = 0; frame < 6000; frame += 1) {
         if (pauseEvery !== null && frame % pauseEvery === 0) pauseFor(machine, () => undefined);
-        for (const event of session.update(STEP_MS)) out.push(`${frame}:${event.type}:${session.score}`);
+        for (const event of tick(session)) out.push(`${frame}:${event.type}:${session.score}`);
         if (session.activeParcel && session.activeParcel.progress > 0.5) {
           for (const event of session.choose(correctSide(session))) out.push(`${frame}:${event.type}:${session.score}`);
         }
@@ -426,7 +519,7 @@ describe('a complete run', () => {
     };
 
     while (session.shiftStatus && session.shiftStatus.plan.number < 9) {
-      const events = session.update(STEP_MS);
+      const events = tick(session);
       if (session.activeParcel) events.push(...session.choose(correctSide(session)));
       record(events);
     }
@@ -450,7 +543,7 @@ describe('a complete run', () => {
     let spawned = 0;
     let resolved = 0;
     for (let frame = 0; frame < 30_000; frame += 1) {
-      const events = session.update(STEP_MS);
+      const events = tick(session);
       if (session.activeParcel && decide() < 0.02) events.push(...session.choose(decide() < 0.8 ? correctSide(session) : wrongSide(session)));
       for (const event of events) {
         if (event.type === 'PARCEL_SPAWNED') {

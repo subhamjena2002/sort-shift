@@ -37,7 +37,7 @@ export interface Parcel {
 export type RuleMode = 'COLOR' | 'SHAPE' | 'REVERSE' | 'COMBINATION';
 
 /** High-level application states. */
-export type GameState = 'MENU' | 'PLAYING' | 'PAUSED' | 'GAME_OVER';
+export type GameState = 'MENU' | 'PLAYING' | 'SHIFT_ANNOUNCEMENT' | 'COUNTDOWN' | 'PAUSED' | 'GAME_OVER';
 
 export type MistakeReason = 'WRONG_BIN' | 'MISSED';
 

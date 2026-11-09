@@ -46,6 +46,11 @@ describe('difficulty scaling', () => {
     }
   });
 
+  it('gives rules with more mappings extra time and a higher floor', () => {
+    expect(computeShiftDifficulty(9, 'COLOR', SCALING, 4).travelMs).toBeGreaterThan(computeShiftDifficulty(9, 'COLOR', SCALING, 2).travelMs);
+    expect(computeShiftDifficulty(5000, 'COLOR', SCALING, 4).travelMs).toBe(SCALING.minDecisionMs.COLOR + 2 * SCALING.extraClauseFloorMs);
+  });
+
   it('is a pure function of its inputs', () => {
     expect(computeShiftDifficulty(9, 'SHAPE')).toEqual(computeShiftDifficulty(9, 'SHAPE'));
   });

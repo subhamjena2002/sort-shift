@@ -54,10 +54,12 @@ export const DEPTH = {
   parcel: 30,
   beltOverlay: 40,
   controls: 50,
-  dim: 55,
   hud: 60,
   feedback: 70,
+  dim: 72,
   announcement: 75,
+  /** Pause and mute stay reachable above a shift announcement. */
+  topControls: 78,
   overlay: 100,
 } as const;
 

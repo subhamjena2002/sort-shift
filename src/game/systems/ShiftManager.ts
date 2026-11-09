@@ -4,6 +4,7 @@ import { ALL_COLORS, ALL_SHAPES } from '../data/parcelCatalog';
 import type { SortingRule } from '../data/sortingRules';
 import { computeShiftDifficulty, type ShiftDifficulty } from './DifficultyManager';
 import { colorsInRule, createRuleSet, reverseRuleSet, shapesInRule, type RuleSet } from './RuleSet';
+import { createShiftBriefing, type ShiftBriefing } from './ShiftBriefing';
 
 /** Everything that defines one shift. Derived purely from its number and the config. */
 export interface ShiftPlan {
@@ -18,10 +19,8 @@ export interface ShiftPlan {
   readonly difficulty: ShiftDifficulty;
   /** True when the shift starts with a reversal warning. */
   readonly warning: boolean;
-  /** Warning portion of the announcement. */
-  readonly warningMs: number;
-  /** Total time the announcement and rule card are on screen. */
-  readonly announcementMs: number;
+  /** True the first time this mode appears in a run. */
+  readonly firstOfMode: boolean;
 }
 
 const INSTRUCTIONS: Readonly<Record<RuleMode, string>> = {
@@ -82,12 +81,6 @@ function ruleForShift(number: number, cycle: number, mode: RuleMode, config: Pro
   }
 }
 
-function announcementTiming(rule: RuleSet, mode: RuleMode, timing: TransitionTiming): { warningMs: number; announcementMs: number } {
-  const warningMs = mode === 'REVERSE' ? timing.warningMs : 0;
-  const extraClauses = Math.max(0, rule.clauses.length - 2);
-  return { warningMs, announcementMs: warningMs + timing.announceMs + timing.learnMs + extraClauses * timing.learnPerExtraClauseMs };
-}
-
 /**
  * The deterministic, endless shift generator. The result depends only on the
  * shift number and config, so no fixed list of shifts is needed and every
@@ -110,9 +103,9 @@ export function generateShiftPlan(shiftNumber: number, config: ProgressionConfig
     mode,
     rule,
     quota: Math.min(config.maxQuota, config.baseQuota + cycle * config.quotaGrowthPerCycle),
-    difficulty: computeShiftDifficulty(shiftNumber, mode, config.difficulty),
+    difficulty: computeShiftDifficulty(shiftNumber, mode, config.difficulty, rule.clauses.length),
     warning: mode === 'REVERSE',
-    ...announcementTiming(rule, mode, config.transition),
+    firstOfMode: cycle === 0 && config.cycle.indexOf(mode) === position,
   };
 }
 
@@ -121,18 +114,26 @@ export class ShiftManager {
   readonly timing: TransitionTiming;
   private readonly config: ProgressionConfig;
   private currentPlan: ShiftPlan;
+  private currentBriefing: ShiftBriefing;
   private correct = 0;
   private mistakes = 0;
   private completed = 0;
+  private readonly seenColors = new Set<ParcelColor>();
 
-  constructor(config: ProgressionConfig = DEFAULT_PROGRESSION) {
+  constructor(config: ProgressionConfig = DEFAULT_PROGRESSION, startShift = 1) {
     this.config = config;
     this.timing = config.transition;
-    this.currentPlan = generateShiftPlan(1, config);
+    for (let shift = 1; shift < startShift; shift += 1) this.rememberColors(generateShiftPlan(shift, config));
+    this.currentPlan = generateShiftPlan(startShift, config);
+    this.currentBriefing = createShiftBriefing(this.currentPlan, startShift > 1 ? generateShiftPlan(startShift - 1, config) : null, [...this.seenColors]);
   }
 
   get plan(): ShiftPlan {
     return this.currentPlan;
+  }
+
+  get briefing(): ShiftBriefing {
+    return this.currentBriefing;
   }
 
   get correctInShift(): number {
@@ -168,7 +169,14 @@ export class ShiftManager {
     this.completed += 1;
     this.correct = 0;
     this.mistakes = 0;
-    this.currentPlan = generateShiftPlan(this.currentPlan.number + 1, this.config);
+    const previous = this.currentPlan;
+    this.rememberColors(previous);
+    this.currentPlan = generateShiftPlan(previous.number + 1, this.config);
+    this.currentBriefing = createShiftBriefing(this.currentPlan, previous, [...this.seenColors]);
     return this.currentPlan;
+  }
+
+  private rememberColors(plan: ShiftPlan): void {
+    for (const color of plan.rule.domain.colors) this.seenColors.add(color);
   }
 }

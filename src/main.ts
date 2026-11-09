@@ -39,6 +39,12 @@ async function start(): Promise<void> {
   await waitForFonts();
   handle = createGame(parent);
   if (import.meta.env.DEV) window.__SORT_SHIFT_DEBUG__ = handle;
+  // Vite replaces this flag at build time, so a normal build drops the branch
+  // and never emits the bridge's code.
+  if (import.meta.env.VITE_E2E === 'true') {
+    const { installE2EBridge } = await import('./game/e2e/bridge');
+    installE2EBridge(handle.game);
+  }
 }
 
 void start();

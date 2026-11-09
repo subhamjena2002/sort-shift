@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameOverData, GameState, RunStats } from '../../types/game';
+import type { AudioManager } from '../systems/AudioManager';
 import { GameStateMachine } from '../systems/GameStateMachine';
 import type { HighScoreStore } from '../systems/HighScoreStore';
 import { COLORS } from '../ui/theme';
@@ -8,23 +9,36 @@ import { SceneKeys, type SceneKey } from './SceneKeys';
 const REGISTRY_KEY = 'sortshift.sceneDirector';
 const FADE_MS = 220;
 
+export interface RunOverrides {
+  readonly seed?: number;
+  readonly startShift?: number;
+}
+
 /**
  * The single owner of high-level game flow. Every state change goes through
  * the state machine first, so illegal or duplicate requests (double clicks,
  * pausing twice, restarting during a transition) are simply rejected.
  *
  * Scene layout:
- *   MENU      → Menu scene
- *   PLAYING   → Game scene running
- *   PAUSED    → Game scene paused (still rendered) + Pause overlay
- *   GAME_OVER → Game scene paused (frozen board) + GameOver overlay
+ *   MENU               → Menu scene
+ *   PLAYING            → Game scene running
+ *   SHIFT_ANNOUNCEMENT → Game scene showing a rule card, waiting for the player
+ *   COUNTDOWN          → Game scene counting down to the belt starting
+ *   PAUSED             → Game scene paused (still rendered) + Pause overlay
+ *   GAME_OVER          → Game scene paused (frozen board) + GameOver overlay
  */
 export class SceneDirector {
   readonly machine = new GameStateMachine('MENU');
   readonly highScores: HighScoreStore;
+  readonly audio: AudioManager;
+  /** Fixed starting conditions for a run; only automated tests set these. */
+  runOverrides: RunOverrides = {};
+  /** The state a resume returns to. */
+  private resumeState: GameState = 'PLAYING';
 
-  constructor(highScores: HighScoreStore) {
+  constructor(highScores: HighScoreStore, audio: AudioManager) {
     this.highScores = highScores;
+    this.audio = audio;
   }
 
   static install(game: Phaser.Game, director: SceneDirector): void {
@@ -45,6 +59,7 @@ export class SceneDirector {
   startRun(from: Phaser.Scene): boolean {
     const fromMenu = this.machine.is('MENU');
     if (!this.machine.transition('PLAYING')) return false;
+    this.audio.play('ui');
     const go = (): void => {
       this.stopOthers(from, [SceneKeys.PAUSE, SceneKeys.GAME_OVER]);
       // start() shuts down the calling scene and (re)starts the game scene,
@@ -56,18 +71,22 @@ export class SceneDirector {
     return true;
   }
 
-  /** PLAYING → PAUSED. Must be called from the Game scene. */
+  /** PLAYING / SHIFT_ANNOUNCEMENT / COUNTDOWN → PAUSED. Must be called from the Game scene. */
   pauseRun(game: Phaser.Scene): boolean {
+    const previous = this.machine.state;
     if (!this.machine.transition('PAUSED')) return false;
+    this.resumeState = previous;
+    this.audio.play('ui');
     game.scene.pause();
     game.scene.launch(SceneKeys.PAUSE);
     game.scene.bringToTop(SceneKeys.PAUSE);
     return true;
   }
 
-  /** PAUSED → PLAYING (continue the same run). */
+  /** PAUSED → whatever the run was doing when it was paused. */
   resumeRun(from: Phaser.Scene): boolean {
-    if (!this.machine.is('PAUSED') || !this.machine.transition('PLAYING')) return false;
+    if (!this.machine.is('PAUSED') || !this.machine.transition(this.resumeState)) return false;
+    this.audio.play('ui');
     from.scene.stop(SceneKeys.PAUSE);
     from.scene.resume(SceneKeys.GAME);
     return true;
@@ -87,6 +106,7 @@ export class SceneDirector {
   /** PAUSED / GAME_OVER → MENU. */
   goToMenu(from: Phaser.Scene): boolean {
     if (!this.machine.transition('MENU')) return false;
+    this.audio.play('ui');
     this.stopOthers(from, [SceneKeys.GAME, SceneKeys.PAUSE, SceneKeys.GAME_OVER]);
     from.scene.start(SceneKeys.MENU);
     return true;

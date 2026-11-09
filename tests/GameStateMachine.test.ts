@@ -37,6 +37,34 @@ describe('GameStateMachine', () => {
     expect(machine.state).toBe('PAUSED');
   });
 
+  it('follows PLAYING → SHIFT_ANNOUNCEMENT → COUNTDOWN → PLAYING', () => {
+    const machine = new GameStateMachine('PLAYING');
+    expect(machine.transition('SHIFT_ANNOUNCEMENT')).toBe(true);
+    expect(machine.transition('COUNTDOWN')).toBe(true);
+    expect(machine.transition('PLAYING')).toBe(true);
+  });
+
+  it('cannot leave an announcement except by confirming or pausing', () => {
+    const machine = new GameStateMachine('SHIFT_ANNOUNCEMENT');
+    expect(machine.transition('PLAYING')).toBe(false);
+    expect(machine.transition('GAME_OVER')).toBe(false);
+    expect(machine.transition('SHIFT_ANNOUNCEMENT')).toBe(false);
+    expect(machine.state).toBe('SHIFT_ANNOUNCEMENT');
+  });
+
+  it('allows pausing from an announcement or countdown and returning to it', () => {
+    for (const state of ['SHIFT_ANNOUNCEMENT', 'COUNTDOWN'] as const) {
+      const machine = new GameStateMachine(state);
+      expect(machine.transition('PAUSED')).toBe(true);
+      expect(machine.transition(state)).toBe(true);
+    }
+  });
+
+  it('does not allow a countdown to go back to an announcement', () => {
+    const machine = new GameStateMachine('COUNTDOWN');
+    expect(machine.transition('SHIFT_ANNOUNCEMENT')).toBe(false);
+  });
+
   it('notifies listeners and supports unsubscribing', () => {
     const machine = new GameStateMachine();
     const listener = vi.fn();

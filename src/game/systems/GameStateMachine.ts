@@ -3,9 +3,13 @@ import type { GameState } from '../../types/game';
 /** Legal transitions between the high-level game states. */
 export const GAME_STATE_TRANSITIONS: Readonly<Record<GameState, readonly GameState[]>> = {
   MENU: ['PLAYING'],
-  PLAYING: ['PAUSED', 'GAME_OVER'],
-  // PAUSED -> PLAYING covers both "resume" and "restart".
-  PAUSED: ['PLAYING', 'MENU'],
+  PLAYING: ['PAUSED', 'GAME_OVER', 'SHIFT_ANNOUNCEMENT'],
+  // An announcement can only be left by confirming readiness, or by pausing.
+  SHIFT_ANNOUNCEMENT: ['COUNTDOWN', 'PAUSED'],
+  COUNTDOWN: ['PLAYING', 'PAUSED'],
+  // PAUSED -> PLAYING covers both "resume" and "restart". The other two
+  // resume a run that was paused during an announcement or a countdown.
+  PAUSED: ['PLAYING', 'SHIFT_ANNOUNCEMENT', 'COUNTDOWN', 'MENU'],
   GAME_OVER: ['PLAYING', 'MENU'],
 };
 

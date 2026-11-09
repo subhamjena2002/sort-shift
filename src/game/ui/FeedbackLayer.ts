@@ -14,6 +14,7 @@ export class FeedbackLayer {
   private readonly successBurst: Phaser.GameObjects.Particles.ParticleEmitter;
   private readonly failBurst: Phaser.GameObjects.Particles.ParticleEmitter;
   private readonly goldenBurst: Phaser.GameObjects.Particles.ParticleEmitter;
+  private readonly stampImage: Phaser.GameObjects.Image;
   private nextPopup = 0;
 
   constructor(scene: Phaser.Scene, bannerX: number, bannerY: number, uiScale: number) {
@@ -46,6 +47,22 @@ export class FeedbackLayer {
     this.successBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.success)).setDepth(DEPTH.feedback);
     this.failBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.danger)).setDepth(DEPTH.feedback);
     this.goldenBurst = scene.add.particles(0, 0, TEXTURES.spark, burstConfig(COLORS.gold)).setDepth(DEPTH.feedback);
+    this.stampImage = scene.add.image(0, 0, TEXTURES.stampCorrect).setDepth(DEPTH.feedback).setVisible(false);
+  }
+
+  /** Check mark or cross over the bin, so the result never depends on colour alone. */
+  stamp(x: number, y: number, success: boolean): void {
+    const image = this.stampImage;
+    this.scene.tweens.killTweensOf(image);
+    image
+      .setTexture(success ? TEXTURES.stampCorrect : TEXTURES.stampWrong)
+      .setPosition(x, y)
+      .setScale(1.5)
+      .setAlpha(1)
+      .setAngle(success ? -8 : 8)
+      .setVisible(true);
+    this.scene.tweens.add({ targets: image, scale: 1, duration: 130, ease: 'Back.easeOut' });
+    this.scene.tweens.add({ targets: image, alpha: 0, delay: 340, duration: 200, onComplete: () => image.setVisible(false) });
   }
 
   popup(x: number, y: number, message: string, color: string): void {
@@ -102,7 +119,8 @@ export class FeedbackLayer {
   }
 
   destroy(): void {
-    this.scene.tweens.killTweensOf([...this.popups, this.banner]);
+    this.scene.tweens.killTweensOf([...this.popups, this.banner, this.stampImage]);
+    this.stampImage.destroy();
     for (const text of this.popups) text.destroy();
     this.popups.length = 0;
     this.banner.destroy();

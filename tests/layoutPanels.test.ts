@@ -37,8 +37,21 @@ describe.each([LANDSCAPE_SIZE, PORTRAIT_SIZE])('HUD panels at %o', (size) => {
     expect(boxFits(layout.rulePanel, size.width, size.height)).toBe(true);
   });
 
-  it('keeps the announcement clear of the rule panel, so the pause button stays reachable', () => {
-    expect(overlaps(layout.announcement, layout.rulePanel)).toBe(false);
+  it('keeps pause and mute reachable beside the announcement card', () => {
     expect(overlaps(layout.announcement, layout.pauseButton)).toBe(false);
+    expect(overlaps(layout.announcement, layout.muteButton)).toBe(false);
+    expect(overlaps(layout.pauseButton, layout.muteButton)).toBe(false);
+  });
+
+  it('keeps the score, mistakes, rule panel and top controls apart', () => {
+    const top = [layout.scorePanel, layout.mistakesPanel, layout.rulePanel, layout.pauseButton, layout.muteButton];
+    for (const box of top) expect(boxFits(box, size.width, size.height)).toBe(true);
+    top.forEach((a, i) => top.slice(i + 1).forEach((b) => expect(overlaps(a, b)).toBe(false)));
+  });
+
+  it('keeps the countdown inside the play area, clear of the rule panel', () => {
+    const { x, y } = layout.countdown;
+    expect(overlaps({ x, y, width: 280, height: 280 }, layout.rulePanel)).toBe(false);
+    expect(boxFits({ x, y, width: 280, height: 280 }, size.width, size.height)).toBe(true);
   });
 });

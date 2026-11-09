@@ -26,7 +26,6 @@ describe('shift generator — the opening shifts', () => {
     const plan = generateShiftPlan(3);
     expect(plan.mode).toBe('REVERSE');
     expect(plan.warning).toBe(true);
-    expect(plan.warningMs).toBeGreaterThan(0);
     expect(destinationFor(plan.rule, { color: 'BLUE', shape: 'CIRCLE' })).toBe('RIGHT');
     expect(destinationFor(plan.rule, { color: 'RED', shape: 'CIRCLE' })).toBe('LEFT');
   });
@@ -100,10 +99,22 @@ describe('shift generator — endless progression', () => {
     expect(generateShiftPlan(4000).quota).toBe(DEFAULT_PROGRESSION.maxQuota);
   });
 
-  it('gives longer learning time to rules with more mappings', () => {
-    const { transition } = DEFAULT_PROGRESSION;
-    expect(generateShiftPlan(1).announcementMs).toBe(transition.announceMs + transition.learnMs);
-    expect(generateShiftPlan(4).announcementMs).toBe(transition.announceMs + transition.learnMs + 2 * transition.learnPerExtraClauseMs);
+  it('marks only the first appearance of each mode as new', () => {
+    const firsts = Array.from({ length: 12 }, (_, i) => generateShiftPlan(i + 1).firstOfMode);
+    expect(firsts).toEqual([true, true, true, true, false, false, false, false, false, false, false, false]);
+  });
+
+  it('has no announcement timer in its configuration', () => {
+    expect(Object.keys(DEFAULT_PROGRESSION.transition).sort()).toEqual([
+      'countdownFrom',
+      'countdownLeadMs',
+      'countdownStepMs',
+      'openingMs',
+      'readyDelayMs',
+      'settleMs',
+    ]);
+    expect(DEFAULT_PROGRESSION.transition.countdownFrom).toBe(3);
+    expect(DEFAULT_PROGRESSION.transition.countdownStepMs).toBe(1000);
   });
 
   it('rejects invalid shift numbers', () => {

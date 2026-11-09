@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { drawArrow } from './Panel';
 import { COLORS, CSS, textStyle } from './theme';
 
-export type ButtonIcon = 'none' | 'left' | 'right' | 'pause';
+export type ButtonIcon = 'none' | 'left' | 'right' | 'pause' | 'sound' | 'muted';
 type VisualState = 'idle' | 'hover' | 'down';
 
 export interface NeonButtonConfig {
@@ -38,10 +38,12 @@ export class NeonButton extends Phaser.GameObjects.Container {
   private pressed = false;
   private enabled = true;
   private flashTimer: Phaser.Time.TimerEvent | null = null;
+  private currentIcon: ButtonIcon;
 
   constructor(scene: Phaser.Scene, config: NeonButtonConfig) {
     super(scene, config.x, config.y);
     this.config = config;
+    this.currentIcon = config.icon ?? 'none';
 
     this.bg = new Phaser.GameObjects.Graphics(scene);
     this.add(this.bg);
@@ -95,6 +97,12 @@ export class NeonButton extends Phaser.GameObjects.Container {
     if (enabled) this.hit.setInteractive({ useHandCursor: true });
     else this.hit.disableInteractive();
     this.setAlpha(enabled ? 1 : 0.45);
+    this.redraw();
+    return this;
+  }
+
+  setIcon(icon: ButtonIcon): this {
+    this.currentIcon = icon;
     this.redraw();
     return this;
   }
@@ -186,7 +194,7 @@ export class NeonButton extends Phaser.GameObjects.Container {
     g.lineStyle(3, accent, 1);
     g.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
 
-    const icon = this.config.icon ?? 'none';
+    const icon = this.currentIcon;
     const size = this.iconSize();
     const labelY = this.labelText?.y ?? 0;
     if (icon === 'pause') {
@@ -195,6 +203,20 @@ export class NeonButton extends Phaser.GameObjects.Container {
       g.fillStyle(COLORS.white, 1);
       g.fillRoundedRect(-barW * 1.4, -barH / 2, barW, barH, 3);
       g.fillRoundedRect(barW * 0.4, -barH / 2, barW, barH, 3);
+    } else if (icon === 'sound' || icon === 'muted') {
+      const k = size / 2;
+      g.fillStyle(COLORS.white, 1);
+      g.fillRect(-k * 0.95, -k * 0.34, k * 0.5, k * 0.68);
+      g.fillTriangle(-k * 0.6, 0, k * 0.1, -k * 0.85, k * 0.1, k * 0.85);
+      if (icon === 'sound') {
+        g.lineStyle(3, COLORS.white, 1);
+        g.lineBetween(k * 0.42, -k * 0.34, k * 0.42, k * 0.34);
+        g.lineBetween(k * 0.8, -k * 0.62, k * 0.8, k * 0.62);
+      } else {
+        g.lineStyle(4, COLORS.danger, 1);
+        g.lineBetween(k * 0.3, -k * 0.42, k, k * 0.42);
+        g.lineBetween(k, -k * 0.42, k * 0.3, k * 0.42);
+      }
     } else if ((icon === 'left' || icon === 'right') && this.labelText) {
       const half = this.labelText.width / 2;
       const gap = 14;

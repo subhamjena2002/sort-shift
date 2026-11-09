@@ -6,6 +6,7 @@ import { GameScene } from './scenes/GameScene';
 import { MenuScene } from './scenes/MenuScene';
 import { PauseScene } from './scenes/PauseScene';
 import { SceneDirector } from './scenes/SceneDirector';
+import { AudioManager, installAudioUnlock, type AudioContextLike } from './systems/AudioManager';
 import { HighScoreStore } from './systems/HighScoreStore';
 import { installResponsiveScaling } from './systems/ResponsiveScaler';
 import { getBrowserStorage } from './utils/storage';
@@ -13,6 +14,10 @@ import { getBrowserStorage } from './utils/storage';
 export interface GameHandle {
   readonly game: Phaser.Game;
   destroy(): void;
+}
+
+function createBrowserAudioContext(): AudioContextLike | null {
+  return typeof AudioContext === 'undefined' ? null : (new AudioContext() as unknown as AudioContextLike);
 }
 
 /** Create and boot the Phaser game inside the given parent element. */
@@ -36,8 +41,8 @@ export function createGame(parent: HTMLElement): GameHandle {
       // Mouse + up to two simultaneous touches (thumbs on both buttons).
       activePointers: 3,
     },
-    // No sound assets in this milestone; avoids creating an AudioContext
-    // (and the browser autoplay warning that comes with it).
+    // Sound is synthesised by AudioManager after a user gesture, so Phaser's
+    // own audio system (and its autoplay warning) is not needed.
     audio: { noAudio: true },
     render: {
       antialias: true,
@@ -48,13 +53,18 @@ export function createGame(parent: HTMLElement): GameHandle {
   };
 
   const game = new Phaser.Game(config);
-  SceneDirector.install(game, new SceneDirector(new HighScoreStore(getBrowserStorage())));
+  const storage = getBrowserStorage();
+  const audio = new AudioManager({ storage, createContext: createBrowserAudioContext });
+  SceneDirector.install(game, new SceneDirector(new HighScoreStore(storage), audio));
   const uninstallScaling = installResponsiveScaling(game);
+  const uninstallAudioUnlock = installAudioUnlock(audio, window);
 
   return {
     game,
     destroy: () => {
       uninstallScaling();
+      uninstallAudioUnlock();
+      audio.destroy();
       game.destroy(true);
     },
   };

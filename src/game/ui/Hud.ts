@@ -14,7 +14,9 @@ export interface HudOptions {
   readonly rule: SortingRule;
   readonly bestScore: number;
   readonly maxMistakes: number;
+  readonly muted: boolean;
   readonly onPause: () => void;
+  readonly onToggleMute: () => void;
 }
 
 const SPEED_SEGMENTS = 8;
@@ -33,6 +35,9 @@ export class Hud {
   private readonly pips: Phaser.GameObjects.Graphics;
   private readonly pipFlash: Phaser.GameObjects.Image;
   private readonly pauseButton: NeonButton;
+  private readonly muteButton: NeonButton;
+  private readonly mistakesLabel: Phaser.GameObjects.Text;
+  private readonly comboFlash: Phaser.GameObjects.Graphics;
   private readonly ruleTitle: Phaser.GameObjects.Text;
   private ruleRows: Phaser.GameObjects.Container[] = [];
   private readonly streakText: Phaser.GameObjects.Text;
@@ -55,23 +60,30 @@ export class Hud {
     this.bestScore = options.bestScore;
     const s = layout.uiScale;
 
+    // Backing panels keep the score and mistakes readable over the busy backdrop.
+    const blockFrames = scene.add.graphics().setDepth(DEPTH.hud);
+    for (const box of [layout.scorePanel, layout.mistakesPanel]) {
+      drawPanel(blockFrames, box.x, box.y, box.width, box.height, { accent: COLORS.panelEdge, radius: 14, glow: false });
+    }
+
     // Score block (top-left).
     const scoreLabel = scene.add
-      .text(layout.score.x, layout.score.y, 'SCORE', textStyle({ size: 18 * s, color: CSS.textDim, letterSpacing: 4 }))
+      .text(layout.score.x, layout.score.y + 2, 'SCORE', textStyle({ size: 18 * s, color: CSS.text, letterSpacing: 4 }))
       .setDepth(DEPTH.hud);
     this.scoreText = scene.add
-      .text(layout.score.x, layout.score.y + 20 * s, '0', textStyle({ font: 'display', size: 44 * s, weight: '900', color: CSS.white, glow: CSS.cyan, glowBlur: 12 }))
+      .text(layout.score.x, layout.score.y + 22 * s, '0', textStyle({ font: 'display', size: 48 * s, weight: '900', color: CSS.white, glow: CSS.cyan, glowBlur: 12 }))
       .setDepth(DEPTH.hud);
     this.metaText = scene.add
-      .text(layout.score.x, layout.score.y + 78 * s, '', textStyle({ size: 18 * s, color: CSS.textDim, letterSpacing: 2 }))
+      .text(layout.score.x, layout.score.y + 86 * s, '', textStyle({ size: 18 * s, color: CSS.amber, letterSpacing: 2 }))
       .setDepth(DEPTH.hud);
-    this.objects.push(scoreLabel, this.scoreText, this.metaText);
+    this.objects.push(blockFrames, scoreLabel, this.scoreText, this.metaText);
 
     // Mistakes block (top-right anchor).
-    const mistakesLabel = scene.add
-      .text(layout.mistakes.x, layout.mistakes.y, 'MISTAKES LEFT', textStyle({ size: 18 * s, color: CSS.textDim, letterSpacing: 3, align: 'right' }))
+    this.mistakesLabel = scene.add
+      .text(layout.mistakes.x, layout.mistakes.y, 'MISTAKES LEFT', textStyle({ size: 18 * s, color: CSS.text, letterSpacing: 2, align: 'right' }))
       .setOrigin(1, 0)
       .setDepth(DEPTH.hud);
+    const mistakesLabel = this.mistakesLabel;
     this.pips = scene.add.graphics().setDepth(DEPTH.hud);
     this.pipFlash = scene.add
       .image(0, 0, TEXTURES.glowDot)
@@ -115,7 +127,10 @@ export class Hud {
       .setOrigin(1, 0)
       .setAlpha(0)
       .setDepth(DEPTH.hud);
-    this.objects.push(comboFrame, streakLabel, this.streakText, this.multiplierText, this.comboBar, this.comboCallout);
+    this.comboFlash = scene.add.graphics().setDepth(DEPTH.hud).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    this.comboFlash.fillStyle(COLORS.amber, 0.45);
+    this.comboFlash.fillRoundedRect(combo.x - combo.width / 2, comboTop, combo.width, combo.height, 14);
+    this.objects.push(comboFrame, streakLabel, this.streakText, this.multiplierText, this.comboBar, this.comboCallout, this.comboFlash);
 
     // Shift panel.
     const shift = layout.shiftPanel;
@@ -154,12 +169,38 @@ export class Hud {
       fireOn: 'up',
       onActivate: options.onPause,
     });
-    this.pauseButton.setDepth(DEPTH.hud);
+    this.pauseButton.setDepth(DEPTH.topControls);
     this.objects.push(this.pauseButton);
+
+    const mb = layout.muteButton;
+    this.muteButton = new NeonButton(scene, {
+      x: mb.x,
+      y: mb.y,
+      width: mb.width,
+      height: mb.height,
+      label: '',
+      icon: options.muted ? 'muted' : 'sound',
+      accent: COLORS.cyan,
+      fireOn: 'up',
+      onActivate: options.onToggleMute,
+    });
+    this.muteButton.setDepth(DEPTH.topControls);
+    this.objects.push(this.muteButton);
 
     this.drawPips();
     this.refreshMeta();
     this.setCombo(0, 1, 5, false);
+  }
+
+  setMuted(muted: boolean): void {
+    this.muteButton.setIcon(muted ? 'muted' : 'sound');
+  }
+
+  /** Celebrate reaching a new multiplier tier. */
+  flashComboTier(): void {
+    this.scene.tweens.killTweensOf(this.comboFlash);
+    this.comboFlash.setAlpha(1);
+    this.scene.tweens.add({ targets: this.comboFlash, alpha: 0, duration: 520, ease: 'Cubic.easeOut' });
   }
 
   /** Brief message in the streak panel's title row, clear of its numbers. */
@@ -182,13 +223,14 @@ export class Hud {
     }
     if (!animate) return;
     this.scene.tweens.killTweensOf(this.scoreText);
-    this.scoreText.setScale(1.18);
+    this.scoreText.setScale(1.08);
     this.scene.tweens.add({ targets: this.scoreText, scale: 1, duration: 220, ease: 'Back.easeOut' });
   }
 
   setMistakesRemaining(remaining: number, animate: boolean): void {
     const lostIndex = this.remaining - 1;
     this.remaining = Math.max(0, remaining);
+    this.mistakesLabel.setColor(this.remaining <= 1 ? CSS.danger : CSS.text);
     this.drawPips();
     if (!animate || remaining >= this.maxMistakes) return;
     const pos = this.pipPosition(lostIndex);
@@ -278,7 +320,7 @@ export class Hud {
   }
 
   destroy(): void {
-    this.scene.tweens.killTweensOf([this.scoreText, this.pipFlash, this.streakText, this.multiplierText, this.comboCallout, ...this.ruleRows]);
+    this.scene.tweens.killTweensOf([this.scoreText, this.pipFlash, this.streakText, this.multiplierText, this.comboCallout, this.comboFlash, ...this.ruleRows]);
     for (const row of this.ruleRows) row.destroy();
     this.ruleRows = [];
     for (const obj of this.objects) obj.destroy();

@@ -69,7 +69,7 @@ function combinationRule(id: string, left: readonly Combo[], right: readonly Com
   const clause = ([color, shape]: Combo, destination: BinSide): RuleClause => ({ when: { color, shape }, destination });
   return {
     id,
-    title: 'COLOR + SHAPE',
+    title: 'COMBINATION: COLOR + SHAPE',
     clauses: [...left.map((combo) => clause(combo, 'LEFT')), ...right.map((combo) => clause(combo, 'RIGHT'))],
   };
 }

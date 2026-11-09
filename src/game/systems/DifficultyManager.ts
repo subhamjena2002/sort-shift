@@ -19,18 +19,22 @@ function stepsToFloor(scaling: DifficultyScaling): number {
 }
 
 /**
- * Pure mapping from progression to pacing. The same shift and mode always
- * give the same result: difficulty depends on progress, never on chance.
+ * Pure mapping from progression to pacing. The same inputs always give the
+ * same result: difficulty depends on progress, never on chance. Rules with
+ * more mappings to look up get proportionally more time.
  */
 export function computeShiftDifficulty(
   shiftNumber: number,
   mode: RuleMode,
   scaling: DifficultyScaling = DEFAULT_DIFFICULTY_SCALING,
+  clauseCount = 2,
 ): ShiftDifficulty {
   const step = Math.max(0, Math.floor(shiftNumber) - 1);
+  const extraClauses = mode === 'COMBINATION' ? 0 : Math.max(0, clauseCount - 2);
   const rawTravel = Math.max(scaling.minTravelMs, scaling.baseTravelMs * scaling.travelFactorPerShift ** step);
-  const withAllowance = rawTravel * scaling.modeTravelAllowance[mode];
-  const travelMs = Math.round(Math.min(scaling.baseTravelMs, Math.max(scaling.minDecisionMs[mode], withAllowance)));
+  const withAllowance = rawTravel * (scaling.modeTravelAllowance[mode] + extraClauses * scaling.extraClauseAllowance);
+  const floor = scaling.minDecisionMs[mode] + extraClauses * scaling.extraClauseFloorMs;
+  const travelMs = Math.round(Math.min(scaling.baseTravelMs, Math.max(floor, withAllowance)));
   const spawnGapMs = Math.round(Math.max(scaling.minSpawnGapMs, scaling.baseSpawnGapMs * scaling.spawnGapFactorPerShift ** step));
   const range = scaling.baseTravelMs - scaling.minTravelMs;
 

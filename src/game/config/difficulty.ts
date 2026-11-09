@@ -15,6 +15,10 @@ export interface DifficultyScaling {
   readonly modeTravelAllowance: Readonly<Record<RuleMode, number>>;
   /** The decision time never drops below this, per mode. */
   readonly minDecisionMs: Readonly<Record<RuleMode, number>>;
+  /** Extra time fraction per rule mapping beyond the first two. */
+  readonly extraClauseAllowance: number;
+  /** Raises the decision-time floor per rule mapping beyond the first two. */
+  readonly extraClauseFloorMs: number;
   /** Gap between one parcel resolving and the next spawning, in shift 1. */
   readonly baseSpawnGapMs: number;
   readonly minSpawnGapMs: number;
@@ -27,6 +31,8 @@ export const DEFAULT_DIFFICULTY_SCALING: DifficultyScaling = {
   travelFactorPerShift: 0.94,
   modeTravelAllowance: { COLOR: 1, SHAPE: 1, REVERSE: 1.03, COMBINATION: 1.08 },
   minDecisionMs: { COLOR: 1500, SHAPE: 1500, REVERSE: 1700, COMBINATION: 2000 },
+  extraClauseAllowance: 0.03,
+  extraClauseFloorMs: 150,
   baseSpawnGapMs: 650,
   minSpawnGapMs: 360,
   spawnGapFactorPerShift: 0.96,

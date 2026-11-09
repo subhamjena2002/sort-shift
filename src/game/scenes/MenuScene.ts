@@ -3,7 +3,8 @@ import { PARCEL_COLORS } from '../data/parcelCatalog';
 import { bindMenuKeys } from '../systems/InputController';
 import { watchLayout } from '../systems/ResponsiveScaler';
 import { Backdrop } from '../ui/Backdrop';
-import { NeonButton } from '../ui/NeonButton';
+import { computeLayout } from '../ui/layout';
+import { NeonButton, type ButtonIcon } from '../ui/NeonButton';
 import { drawPanel } from '../ui/Panel';
 import { PARCEL_TEXTURE_SIZE, TEXTURES } from '../ui/textures';
 import { COLORS, CSS, DEPTH, textStyle } from '../ui/theme';
@@ -31,7 +32,7 @@ function menuLayout(width: number, height: number): MenuLayout {
   if (height > width) {
     return {
       titleY: 330, titleSize: 76, subtitleY: 410, playY: 620, playW: 460, playH: 140, bestY: 730,
-      controlsY: 950, controlsW: 640, controlsH: 270, stackedControls: true,
+      controlsY: 970, controlsW: 640, controlsH: 320, stackedControls: true,
       parcelOffsetX: 170, parcelY: 190, uiScale: 1.15,
     };
   }
@@ -97,7 +98,19 @@ export class MenuScene extends Phaser.Scene {
 
     this.buildControls(cx, L);
 
-    bindMenuKeys(this, { ENTER: play, SPACE: play });
+    const muteBox = computeLayout(width, height).muteButton;
+    const pauseBox = computeLayout(width, height).pauseButton;
+    const iconFor = (muted: boolean): ButtonIcon => (muted ? 'muted' : 'sound');
+    const toggleMute = (): void => {
+      muteButton.setIcon(iconFor(director.audio.toggleMuted()));
+      director.audio.play('ui');
+    };
+    const muteButton = new NeonButton(this, {
+      x: pauseBox.x, y: pauseBox.y, width: muteBox.width, height: muteBox.height,
+      label: '', icon: iconFor(director.audio.muted), accent: COLORS.cyan, fireOn: 'up', onActivate: toggleMute,
+    }).setDepth(DEPTH.controls);
+
+    bindMenuKeys(this, { ENTER: play, SPACE: play, N: toggleMute });
     watchLayout(this, () => this.scene.restart());
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.backdrop?.destroy();
@@ -120,6 +133,7 @@ export class MenuScene extends Phaser.Scene {
       ['←  /  A', 'LEFT BIN'],
       ['→  /  D', 'RIGHT BIN'],
       ['ESC  /  P', 'PAUSE'],
+      ['N', 'SOUND'],
     ];
     const keyStyle = textStyle({ font: 'display', size: 20 * L.uiScale, weight: '700', color: CSS.white });
     const actStyle = textStyle({ size: 20 * L.uiScale, color: CSS.textDim, letterSpacing: 3 });

@@ -31,6 +31,8 @@ export class Conveyor {
   private readonly streaks: Phaser.GameObjects.TileSprite;
   private readonly railChases: Phaser.GameObjects.TileSprite[] = [];
   private readonly zoneFlash: Phaser.GameObjects.Graphics;
+  private readonly zoneFrame: Phaser.GameObjects.Graphics;
+  private readonly zoneLabel: Phaser.GameObjects.Text;
   private readonly alertStripes: Phaser.GameObjects.Graphics;
   private readonly gateFlashes: Readonly<Record<BinSide, Phaser.GameObjects.Graphics>>;
   private readonly gateFlashSize: number;
@@ -125,20 +127,43 @@ export class Conveyor {
     this.zoneFlash.fillRect(left, zoneTop, width, belt.decisionY - zoneTop);
     this.objects.push(this.zoneFlash);
 
+    // Corner brackets that light up while a parcel can be sorted at the gate.
+    this.zoneFrame = scene.add.graphics().setDepth(DEPTH.belt).setAlpha(0);
+    this.zoneFrame.lineStyle(5, COLORS.white, 1);
+    const bracket = 26;
+    const inset = 6;
+    this.zoneFrame.beginPath();
+    this.zoneFrame.moveTo(left + inset, zoneTop + inset + bracket);
+    this.zoneFrame.lineTo(left + inset, zoneTop + inset);
+    this.zoneFrame.lineTo(left + inset + bracket, zoneTop + inset);
+    this.zoneFrame.moveTo(right - inset - bracket, zoneTop + inset);
+    this.zoneFrame.lineTo(right - inset, zoneTop + inset);
+    this.zoneFrame.lineTo(right - inset, zoneTop + inset + bracket);
+    this.zoneFrame.moveTo(right - inset, belt.decisionY - inset - bracket);
+    this.zoneFrame.lineTo(right - inset, belt.decisionY - inset);
+    this.zoneFrame.lineTo(right - inset - bracket, belt.decisionY - inset);
+    this.zoneFrame.moveTo(left + inset + bracket, belt.decisionY - inset);
+    this.zoneFrame.lineTo(left + inset, belt.decisionY - inset);
+    this.zoneFrame.lineTo(left + inset, belt.decisionY - inset - bracket);
+    this.zoneFrame.strokePath();
+    this.objects.push(this.zoneFrame);
+
     // Hazard stripes across the belt, strobed while a shift change is announced.
     this.alertStripes = scene.add.graphics().setDepth(DEPTH.belt).setAlpha(0);
     this.alertStripes.fillStyle(COLORS.amber, 0.55);
-    for (let sx = left; sx < right; sx += 44) {
-      this.alertStripes.fillTriangle(sx, zoneTop, sx + 22, zoneTop, sx, belt.decisionY);
+    for (let sx = left; sx < right - 22; sx += 44) {
+      for (const bandY of [zoneTop + 4, belt.decisionY - 30]) {
+        this.alertStripes.fillTriangle(sx, bandY + 26, sx + 22, bandY, sx + 34, bandY);
+      }
     }
     this.objects.push(this.alertStripes);
 
-    const zoneLabel = scene.add
+    this.zoneLabel = scene.add
       .text(x, zoneTop - 4, 'SORT ZONE', textStyle({ size: 15, color: CSS.magenta, letterSpacing: 4 }))
       .setOrigin(0.5, 1)
       .setAlpha(0.85)
       .setDepth(DEPTH.belt);
-    this.objects.push(zoneLabel);
+    this.objects.push(this.zoneLabel);
 
     // Decision line ("gate") with outward chevrons, extending over the rails.
     this.gateLine = scene.add.graphics().setDepth(DEPTH.beltOverlay);
@@ -264,7 +289,10 @@ export class Conveyor {
     this.zoneHeat += (target - this.zoneHeat) * Math.min(1, deltaMs / 120);
     const pulse = 0.75 + 0.25 * Math.sin(this.clock / 90);
     this.zoneGlow.setAlpha(0.35 + 0.65 * this.zoneHeat * pulse);
+    this.zoneFrame.setAlpha(this.zoneHeat * pulse);
     this.gateLine.setAlpha(0.7 + 0.3 * (zoneActive ? pulse : 1));
+    const label = zoneActive ? 'SORT NOW' : 'SORT ZONE';
+    if (this.zoneLabel.text !== label) this.zoneLabel.setText(label).setColor(zoneActive ? CSS.white : CSS.magenta);
   }
 
   flashReject(): void {

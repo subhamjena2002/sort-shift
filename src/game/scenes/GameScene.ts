@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import type { BinSide, RunStats } from '../../types/game';
+import type { BinSide, GameState, RunStats } from '../../types/game';
 import type { PlayerIntent } from '../config/controls';
 import { MAX_FRAME_DELTA_MS } from '../config/display';
 import { DEFAULT_DIFFICULTY } from '../config/difficulty';
@@ -10,8 +10,10 @@ import { SortBin } from '../entities/SortBin';
 import { InputController } from '../systems/InputController';
 import { watchLayout } from '../systems/ResponsiveScaler';
 import { RunSession, type BonusKind, type SessionEvent } from '../systems/RunSession';
+import { soundsForEvents } from '../systems/sessionSounds';
 import { ShiftManager } from '../systems/ShiftManager';
 import { Backdrop } from '../ui/Backdrop';
+import { CountdownDisplay } from '../ui/CountdownDisplay';
 import { FeedbackLayer } from '../ui/FeedbackLayer';
 import { Hud } from '../ui/Hud';
 import { beltProgressToY, computeLayout, type GameLayout, type Point } from '../ui/layout';
@@ -33,14 +35,16 @@ interface DepotView {
   readonly hud: Hud;
   readonly feedback: FeedbackLayer;
   readonly announcement: ShiftAnnouncement;
+  readonly countdown: CountdownDisplay;
   readonly parcels: readonly ParcelView[];
 }
 
 const RUN_END_DELAY_MS = 1100;
 // One parcel on the belt plus up to two still finishing their exit animation.
 const PARCEL_POOL_SIZE = 3;
-const BELT_SPEED_DURING_SHIFT_CHANGE = 0.3;
 const BELT_EASE_MS = 320;
+/** High-level states in which this scene is driving a run. */
+const RUN_STATES: readonly GameState[] = ['PLAYING', 'SHIFT_ANNOUNCEMENT', 'COUNTDOWN'];
 
 const BONUS_LABELS: Readonly<Record<BonusKind, string>> = {
   STREAK: 'STREAK',
@@ -68,7 +72,8 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.director = SceneDirector.from(this);
-    this.session = new RunSession({ shifts: new ShiftManager(), random: createSeededRandom(randomSeed()) });
+    const { seed, startShift } = this.director.runOverrides;
+    this.session = new RunSession({ shifts: new ShiftManager(undefined, startShift), random: createSeededRandom(seed ?? randomSeed()) });
     this.activeParcelView = null;
     this.endTimer = null;
     this.beltSpeedFactor = 1;
@@ -86,23 +91,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
-    if (!this.view || !this.director.machine.is('PLAYING')) return;
+    if (!this.view || !RUN_STATES.includes(this.director.machine.state)) return;
 
     const dt = Math.min(delta, MAX_FRAME_DELTA_MS);
     this.applyEvents(this.session.update(dt));
     const view = this.view;
 
-    const transition = this.session.transition;
-    const announcing = transition?.stage === 'ANNOUNCING';
-    if (transition && announcing) view.announcement.setProgress(transition.remainingMs / transition.durationMs);
-
-    // The belt eases down for a shift change and winds to a stop when the run ends.
-    const targetSpeed = this.session.isOver ? 0 : this.session.phase === 'TRANSITION' ? BELT_SPEED_DURING_SHIFT_CHANGE : 1;
+    // The belt winds down between shifts and when the run ends, and stays
+    // stopped until the countdown has finished.
+    const stopped = this.session.isOver || this.session.phase === 'TRANSITION';
+    const targetSpeed = stopped ? 0 : 1;
     this.beltSpeedFactor += (targetSpeed - this.beltSpeedFactor) * Math.min(1, dt / BELT_EASE_MS);
     const belt = view.layout.belt;
     const pixelsPerMs = ((belt.decisionY - belt.spawnY) / this.session.currentTravelTimeMs) * this.beltSpeedFactor;
     const active = this.session.activeParcel;
-    view.conveyor.update(dt, pixelsPerMs, active?.inDecisionZone ?? false, announcing);
+    const counting = this.session.transition?.stage === 'COUNTDOWN';
+    view.conveyor.update(dt, pixelsPerMs, active?.inDecisionZone ?? false, counting);
 
     if (active && this.activeParcelView?.parcelId === active.parcel.id) {
       this.activeParcelView.setBeltPosition(beltProgressToY(belt, active.progress), active.progress);
@@ -118,17 +122,39 @@ export class GameScene extends Phaser.Scene {
 
   private handleIntent(intent: PlayerIntent, source: 'keyboard' | 'pointer'): void {
     const view = this.view;
-    if (!view || !this.director.machine.is('PLAYING')) return;
+    const { machine } = this.director;
+    if (!view || !RUN_STATES.includes(machine.state)) return;
 
-    if (intent === 'PAUSE') {
-      if (source === 'keyboard') view.hud.flashPause();
-      this.requestPause();
-      return;
+    switch (intent) {
+      case 'PAUSE':
+        if (source === 'keyboard') view.hud.flashPause();
+        this.requestPause();
+        return;
+      case 'MUTE':
+        this.toggleMute(view);
+        return;
+      case 'READY':
+        this.confirmReady(view);
+        return;
+      case 'LEFT':
+      case 'RIGHT':
+        // Sorting exists only while the belt runs, never during a shift change.
+        if (!machine.is('PLAYING') || this.session.isOver) return;
+        if (source === 'keyboard') view.buttons[intent].flash();
+        this.applyEvents(this.session.choose(intent));
+        return;
     }
+  }
 
-    if (this.session.isOver) return;
-    if (source === 'keyboard') view.buttons[intent].flash();
-    this.applyEvents(this.session.choose(intent));
+  private confirmReady(view: DepotView): void {
+    if (!this.director.machine.is('SHIFT_ANNOUNCEMENT') || !view.announcement.isArmed(this.time.now)) return;
+    this.applyEvents(this.session.confirmReady());
+  }
+
+  private toggleMute(view: DepotView): void {
+    const { audio } = this.director;
+    view.hud.setMuted(audio.toggleMuted());
+    audio.play('ui');
   }
 
   private requestPause(): void {
@@ -136,8 +162,10 @@ export class GameScene extends Phaser.Scene {
     this.director.pauseRun(this);
   }
 
+  /** Losing focus pauses anything time-driven. An announcement is already waiting. */
   private handleFocusLoss(): void {
-    if (this.director.machine.is('PLAYING')) this.requestPause();
+    const { machine } = this.director;
+    if (machine.is('PLAYING') || machine.is('COUNTDOWN')) this.requestPause();
   }
 
   // --------------------------------------------------------------- events
@@ -147,6 +175,8 @@ export class GameScene extends Phaser.Scene {
     if (!view) return;
     const belt = view.layout.belt;
     let lastMouth: Point = { x: belt.x, y: belt.decisionY };
+    const { machine, audio } = this.director;
+    for (const sound of soundsForEvents(events)) audio.play(sound);
 
     for (const event of events) {
       switch (event.type) {
@@ -165,6 +195,7 @@ export class GameScene extends Phaser.Scene {
           bin.flash(event.correct);
           view.conveyor.flashGate(event.chosen, event.correct);
           view.feedback.burst(mouth.x, mouth.y, event.correct);
+          view.feedback.stamp(mouth.x, mouth.y, event.correct);
           if (event.correct) {
             view.feedback.popup(mouth.x, mouth.y - 70, `+${event.pointsAwarded}`, CSS.success);
           } else {
@@ -177,6 +208,7 @@ export class GameScene extends Phaser.Scene {
           this.takeActiveParcelView(event.parcel.id)?.playMissed(belt.rejectY, () => undefined);
           view.conveyor.flashReject();
           view.feedback.burst(belt.x, belt.decisionY, false);
+          view.feedback.stamp(belt.x, belt.decisionY, false);
           view.feedback.popup(belt.x, belt.decisionY - 80, 'MISSED', CSS.danger);
           this.cameras.main.shake(200, 0.007);
           break;
@@ -196,6 +228,7 @@ export class GameScene extends Phaser.Scene {
           view.hud.setCombo(event.combo.streak, event.combo.multiplier, status?.nextTierAt ?? null, !event.combo.broken);
           if (event.combo.multiplierIncreased) {
             view.feedback.showBanner(`COMBO ×${event.combo.multiplier}`, CSS.amber, 380);
+            view.hud.flashComboTier();
           }
           if (event.combo.broken && event.combo.previousStreak >= 5) {
             view.hud.showComboCallout('LOST', CSS.danger);
@@ -213,15 +246,27 @@ export class GameScene extends Phaser.Scene {
           break;
         }
         case 'SHIFT_ANNOUNCED': {
+          machine.transition('SHIFT_ANNOUNCEMENT');
+          this.beltSpeedFactor = 0;
           this.showRule(view, event.plan.rule, true);
           this.refreshShiftReadout(view);
-          view.announcement.show(event.plan, event.opening, true);
-          if (event.plan.warning) this.cameras.main.shake(260, 0.005);
+          view.announcement.show(event.briefing, event.opening, true);
+          break;
+        }
+        case 'COUNTDOWN_STARTED': {
+          machine.transition('COUNTDOWN');
+          view.announcement.hide();
+          break;
+        }
+        case 'COUNTDOWN_TICK': {
+          view.countdown.show(event.value, true);
           break;
         }
         case 'SHIFT_STARTED': {
-          view.announcement.hide();
-          view.feedback.showBanner('GO', CSS.success, 160);
+          machine.transition('PLAYING');
+          view.countdown.hide();
+          view.feedback.showBanner('GO!', CSS.success, 220);
+          this.cameras.main.flash(120, 34, 240, 255);
           break;
         }
         case 'RUN_ENDED': {
@@ -326,17 +371,20 @@ export class GameScene extends Phaser.Scene {
       rule,
       bestScore: this.director.highScores.getBest(),
       maxMistakes: this.session.maxMistakes,
+      muted: this.director.audio.muted,
       onPause: () => this.handleIntent('PAUSE', 'pointer'),
+      onToggleMute: () => this.handleIntent('MUTE', 'pointer'),
     });
     hud.setScore(this.session.score, false);
     hud.setMistakesRemaining(this.session.mistakesRemaining, false);
 
     const feedback = new FeedbackLayer(this, layout.banner.x, layout.banner.y, layout.uiScale);
-    const announcement = new ShiftAnnouncement(this, layout);
+    const announcement = new ShiftAnnouncement(this, layout, () => this.handleIntent('READY', 'pointer'));
+    const countdown = new CountdownDisplay(this, layout);
     const parcels: ParcelView[] = [];
     for (let i = 0; i < PARCEL_POOL_SIZE; i += 1) parcels.push(new ParcelView(this, layout.belt.parcelSize));
 
-    const view: DepotView = { layout, backdrop, conveyor, bins, buttons, hud, feedback, announcement, parcels };
+    const view: DepotView = { layout, backdrop, conveyor, bins, buttons, hud, feedback, announcement, countdown, parcels };
     this.view = view;
 
     this.refreshShiftReadout(view);
@@ -345,10 +393,8 @@ export class GameScene extends Phaser.Scene {
 
     // Restore an in-flight announcement or parcel at its logical state.
     const transition = this.session.transition;
-    if (transition?.stage === 'ANNOUNCING') {
-      announcement.show(transition.plan, transition.opening, false);
-      announcement.setProgress(transition.remainingMs / transition.durationMs);
-    }
+    if (transition?.stage === 'ANNOUNCING') announcement.show(transition.briefing, transition.opening, false);
+    if (transition?.countdownValue != null) countdown.show(transition.countdownValue, false);
     this.activeParcelView = null;
     const active = this.session.activeParcel;
     if (active) {
@@ -369,6 +415,7 @@ export class GameScene extends Phaser.Scene {
     this.view = null;
     this.activeParcelView = null;
     for (const parcel of view.parcels) parcel.destroy();
+    view.countdown.destroy();
     view.announcement.destroy();
     view.feedback.destroy();
     view.hud.destroy();
