@@ -12,6 +12,10 @@ dist
 dist-ssr
 test-results
 playwright-report
+__pycache__
+*.blend1
+# Regenerable render intermediates (see blender/README.md)
+blender/source
 *.local
 
 # Editor directories and files

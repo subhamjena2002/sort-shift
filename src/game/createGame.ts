@@ -47,6 +47,9 @@ export function createGame(parent: HTMLElement): GameHandle {
     render: {
       antialias: true,
       powerPreference: 'high-performance',
+      // With all 32 texture slots in use, a text quad could lose one triangle
+      // (seen under software WebGL). 16 is a common hardware limit anyway.
+      maxTextures: 16,
     },
     // Order matters: later scenes render on top (overlays above the game).
     scene: [BootScene, MenuScene, GameScene, PauseScene, GameOverScene],

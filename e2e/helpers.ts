@@ -20,6 +20,11 @@ export interface GameState {
   resolved: number;
   active: { id: number; kind: string; progress: number; attributes: { color: string; shape: string }; expected: 'LEFT' | 'RIGHT' } | null;
   goldenSeen: number;
+  activeTexture: string | null;
+  activeCarrierVisible: boolean;
+  backgroundTexture: string | null;
+  binTextures: { LEFT: string | null; RIGHT: string | null };
+  loadedArt: string[];
   announcementVisible: boolean;
   announcementTitle: string | null;
   readyArmed: boolean;
@@ -33,13 +38,16 @@ export interface GameState {
 }
 
 /** Fails any test in which the page throws or logs an error. */
-export const test = base.extend<{ pageErrors: string[] }>({
+export const test = base.extend<{ allowFailedRequests: boolean; pageErrors: string[] }>({
+  // Set for tests that deliberately make a file fail to load.
+  allowFailedRequests: [false, { option: true }],
   pageErrors: [
-    async ({ page }, use) => {
+    async ({ page, allowFailedRequests }, use) => {
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
       page.on('console', (message) => {
-        if (message.type() === 'error') errors.push(`console: ${message.text()}`);
+        const failedRequest = message.text().startsWith('Failed to load resource');
+        if (message.type() === 'error' && !(allowFailedRequests && failedRequest)) errors.push(`console: ${message.text()}`);
       });
       await use(errors);
       expect(errors, 'uncaught browser errors').toEqual([]);

@@ -6,6 +6,7 @@ import { Backdrop } from '../ui/Backdrop';
 import { computeLayout } from '../ui/layout';
 import { NeonButton, type ButtonIcon } from '../ui/NeonButton';
 import { drawPanel } from '../ui/Panel';
+import { createParcelPreview } from '../ui/ParcelPreview';
 import { PARCEL_TEXTURE_SIZE, TEXTURES } from '../ui/textures';
 import { COLORS, CSS, DEPTH, textStyle } from '../ui/theme';
 import { fadeIn, SceneDirector } from './SceneDirector';
@@ -65,11 +66,12 @@ export class MenuScene extends Phaser.Scene {
     // Decorative parcels either side of the title.
     const parcelScale = (L.uiScale * 120) / PARCEL_TEXTURE_SIZE;
     [
-      { x: cx - L.parcelOffsetX, key: PARCEL_COLORS.BLUE.textureKey, tint: PARCEL_COLORS.BLUE.fill, angle: -12, delay: 0 },
-      { x: cx + L.parcelOffsetX, key: PARCEL_COLORS.RED.textureKey, tint: PARCEL_COLORS.RED.fill, angle: 10, delay: 600 },
+      { x: cx - L.parcelOffsetX, color: 'BLUE' as const, tint: PARCEL_COLORS.BLUE.fill, angle: -12, delay: 0 },
+      { x: cx + L.parcelOffsetX, color: 'RED' as const, tint: PARCEL_COLORS.RED.fill, angle: 10, delay: 600 },
     ].forEach((p) => {
       const glow = this.add.image(p.x, L.parcelY, TEXTURES.parcelGlow).setBlendMode(Phaser.BlendModes.ADD).setTint(p.tint).setAlpha(0.6).setScale(parcelScale * 1.2).setDepth(DEPTH.machinery);
-      const parcel = this.add.image(p.x, L.parcelY, p.key).setScale(parcelScale).setAngle(p.angle).setDepth(DEPTH.machinery);
+      const parcel = createParcelPreview(this, { color: p.color, shape: 'SQUARE' }, L.uiScale * 120).setPosition(p.x, L.parcelY).setAngle(p.angle).setDepth(DEPTH.machinery);
+      this.add.existing(parcel);
       this.tweens.add({ targets: [parcel, glow], y: L.parcelY - 16, duration: 1600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: p.delay });
       this.tweens.add({ targets: parcel, angle: p.angle * -0.4, duration: 2400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut', delay: p.delay });
     });

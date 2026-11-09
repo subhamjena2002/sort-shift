@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { BinSide } from '../../types/game';
+import { BIN_ART, binAssetKey } from '../assets/assetManifest';
 import { createGlyphRow } from '../ui/GlyphRow';
 import type { Box, Point } from '../ui/layout';
 import { drawPanel } from '../ui/Panel';
@@ -17,6 +18,9 @@ export class SortBin {
   private readonly flashLayer: Phaser.GameObjects.Graphics;
   private readonly chipY: number;
   private readonly uiScale: number;
+  private readonly chipMaxWidth: number;
+  /** Side of the square bin image on screen, or null when using the drawn fallback. */
+  private readonly artSize: number | null;
   private acceptsRow: Phaser.GameObjects.Container | null = null;
 
   constructor(scene: Phaser.Scene, box: Box, side: BinSide, accepts: readonly RuleGlyph[], uiScale: number) {
@@ -25,7 +29,32 @@ export class SortBin {
     this.uiScale = uiScale;
     const w = box.width;
     const h = box.height;
+    this.flashLayer = new Phaser.GameObjects.Graphics(scene).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
 
+    const artKey = binAssetKey(side);
+    if (scene.textures.exists(artKey)) {
+      const size = Math.min(w / BIN_ART.bodyWidth, h / BIN_ART.bodyHeight);
+      this.artSize = size;
+      const image = new Phaser.GameObjects.Image(scene, 0, (0.5 - BIN_ART.bodyCentreY) * size, artKey).setDisplaySize(size, size);
+      const imageTop = image.y - size / 2;
+      const panelTop = imageTop + BIN_ART.labelPanelTop * size;
+      const panelHeight = (BIN_ART.labelPanelBottom - BIN_ART.labelPanelTop) * size;
+      const title = new Phaser.GameObjects.Text(
+        scene,
+        0,
+        panelTop + panelHeight * 0.33,
+        `${side} BIN`,
+        textStyle({ font: 'display', size: 20 * uiScale, weight: '900', color: CSS.white, letterSpacing: 3 }),
+      ).setOrigin(0.5);
+      this.chipY = panelTop + panelHeight * 0.72;
+      this.chipMaxWidth = BIN_ART.bodyWidth * size * 0.8;
+      this.container = scene.add.container(box.x, box.y, [image, title, this.flashLayer]).setDepth(DEPTH.bins);
+      this.setAccepts(accepts);
+      return;
+    }
+
+    this.artSize = null;
+    this.chipMaxWidth = w - 56; // clear of the panel's corner brackets
     const g = new Phaser.GameObjects.Graphics(scene);
     drawPanel(g, 0, 0, w, h, { accent: COLORS.cyan, fill: COLORS.steelDark, radius: 18 });
 
@@ -58,7 +87,6 @@ export class SortBin {
     ).setOrigin(0.5, 0);
 
     this.chipY = title.y + title.height + 12;
-    this.flashLayer = new Phaser.GameObjects.Graphics(scene).setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
 
     this.container = scene.add.container(box.x, box.y, [g, title, this.flashLayer]).setDepth(DEPTH.bins);
     this.setAccepts(accepts);
@@ -70,20 +98,24 @@ export class SortBin {
     const s = this.uiScale;
     const row = createGlyphRow(this.scene, accepts, { iconSize: 16 * s, fontSize: 15 * s, gap: 12 * s });
     row.container.setY(this.chipY);
-    const maxWidth = this.box.width - 56; // clear of the panel's corner brackets
-    if (row.width > maxWidth) row.container.setScale(maxWidth / row.width);
+    if (row.width > this.chipMaxWidth) row.container.setScale(this.chipMaxWidth / row.width);
     this.acceptsRow = row.container;
     this.container.addAt(row.container, 2);
   }
 
   /** Where a sorted parcel should travel to. */
   get mouth(): Point {
+    if (this.artSize !== null) {
+      const offsetFromBody = BIN_ART.openingCentreY - BIN_ART.bodyCentreY;
+      return { x: this.box.x, y: this.box.y + offsetFromBody * this.artSize };
+    }
     return { x: this.box.x, y: this.box.y - this.box.height / 2 + 22 + this.box.height * 0.25 };
   }
 
   flash(success: boolean): void {
     const color = success ? COLORS.success : COLORS.danger;
-    const { width: w, height: h } = this.box;
+    const w = this.artSize !== null ? BIN_ART.bodyWidth * this.artSize : this.box.width;
+    const h = this.artSize !== null ? BIN_ART.bodyHeight * this.artSize : this.box.height;
     this.flashLayer.clear();
     this.flashLayer.fillStyle(color, 0.35);
     this.flashLayer.fillRoundedRect(-w / 2, -h / 2, w, h, 18);

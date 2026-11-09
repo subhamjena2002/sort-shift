@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { BinSide } from '../../types/game';
+import { CONVEYOR_ASSETS, TEXTURE_KEYS } from '../assets/assetManifest';
 import { HATCH_HEIGHT_ABOVE_BELT, type BeltLayout } from '../ui/layout';
 import { drawArrow } from '../ui/Panel';
 import { ensureBeltTile, TEXTURES } from '../ui/textures';
@@ -8,6 +9,7 @@ import { COLORS, CSS, DEPTH, textStyle } from '../ui/theme';
 const RAIL_WIDTH = 24;
 const GEAR_SPACING = 62;
 const GEAR_RADIUS = 12.5;
+const GEAR_DISPLAY_SIZE = 25;
 /** Belt speed (px/ms) at which the motion streaks reach full strength. */
 const STREAK_FULL_SPEED = 0.24;
 
@@ -23,6 +25,8 @@ export class Conveyor {
   private readonly scene: Phaser.Scene;
   private readonly objects: Phaser.GameObjects.GameObject[] = [];
   private readonly surface: Phaser.GameObjects.TileSprite;
+  /** Converts belt travel on screen into the tile's own pixels. */
+  private readonly surfaceScroll: number;
   private readonly endRollers: Phaser.GameObjects.TileSprite[] = [];
   private readonly gears: Phaser.GameObjects.Image[] = [];
   private readonly zoneGlow: Phaser.GameObjects.Graphics;
@@ -83,11 +87,27 @@ export class Conveyor {
       housing.fillRect(railX + RAIL_WIDTH - 5, belt.topY - 10, 5, beltH + 20);
     }
 
+    // Rendered rails lie over the drawn ones, which remain as the fallback.
+    const railArt = CONVEYOR_ASSETS.find((asset) => asset.key === TEXTURE_KEYS.CONVEYOR_RAIL);
+    if (railArt && scene.textures.exists(railArt.key)) {
+      for (const railX of [left - RAIL_WIDTH, right]) {
+        const rail = scene.add
+          .tileSprite(railX + RAIL_WIDTH / 2, belt.topY + beltH / 2, RAIL_WIDTH, beltH + 20, railArt.key)
+          .setTileScale(RAIL_WIDTH / railArt.width)
+          .setDepth(DEPTH.machinery);
+        this.objects.push(rail);
+      }
+    }
+
     // ------------------------------------------- belt surface (scrolls)
-    const tileKey = ensureBeltTile(scene, width);
+    const beltArt = CONVEYOR_ASSETS.find((asset) => asset.key === TEXTURE_KEYS.CONVEYOR_BELT_TILE);
+    const useBeltArt = beltArt !== undefined && scene.textures.exists(beltArt.key);
     this.surface = scene.add
-      .tileSprite(x, belt.topY + beltH / 2, width, beltH, tileKey)
+      .tileSprite(x, belt.topY + beltH / 2, width, beltH, useBeltArt ? beltArt.key : ensureBeltTile(scene, width))
       .setDepth(DEPTH.belt);
+    const tileScale = useBeltArt ? width / beltArt.width : 1;
+    this.surface.setTileScale(tileScale);
+    this.surfaceScroll = 1 / tileScale;
     this.objects.push(this.surface);
 
     // Inner edge shading so the belt reads as recessed.
@@ -189,7 +209,11 @@ export class Conveyor {
     // ------------------------------------------------- rollers (animate)
     for (let gy = belt.topY + 22; gy < belt.endY - 10; gy += GEAR_SPACING) {
       for (const gx of [left - RAIL_WIDTH / 2, right + RAIL_WIDTH / 2]) {
-        const gear = scene.add.image(gx, gy, TEXTURES.roller).setDepth(DEPTH.beltOverlay).setScale(0.78);
+        const useRollerArt = scene.textures.exists(TEXTURE_KEYS.CONVEYOR_ROLLER);
+        const gear = scene.add
+          .image(gx, gy, useRollerArt ? TEXTURE_KEYS.CONVEYOR_ROLLER : TEXTURES.roller)
+          .setDepth(DEPTH.beltOverlay)
+          .setDisplaySize(GEAR_DISPLAY_SIZE, GEAR_DISPLAY_SIZE);
         this.gears.push(gear);
         this.objects.push(gear);
       }
@@ -275,7 +299,7 @@ export class Conveyor {
    */
   update(deltaMs: number, pixelsPerMs: number, zoneActive: boolean, alert = false): void {
     const distance = pixelsPerMs * deltaMs;
-    this.surface.tilePositionY -= distance;
+    this.surface.tilePositionY -= distance * this.surfaceScroll;
     this.streaks.tilePositionY -= distance;
     this.streaks.setAlpha(Math.min(1, pixelsPerMs / STREAK_FULL_SPEED) * 0.7);
     for (const chase of this.railChases) chase.tilePositionY -= distance;

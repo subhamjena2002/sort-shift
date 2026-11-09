@@ -1,19 +1,69 @@
 import Phaser from 'phaser';
+import { BACKGROUND_ASSETS, type ImageAsset } from '../assets/assetManifest';
 import { TEXTURES } from './textures';
 import { COLORS, DEPTH } from './theme';
 
 /**
- * Static factory-floor background: gradient wall, floor grid, wall panels,
- * pipes, ceiling light strips, hazard edge and a few blinking status lamps.
- * Drawn once; only the lamps animate.
+ * Static factory background: the rendered image for this orientation. Until
+ * that image is available (or if it can't be loaded), a drawn version with a
+ * wall, grid, pipes and blinking status lamps is shown instead.
  */
 export class Backdrop {
   private readonly scene: Phaser.Scene;
   private readonly objects: Phaser.GameObjects.GameObject[] = [];
   private readonly lamps: Phaser.GameObjects.Image[] = [];
+  private readonly width: number;
+  private readonly height: number;
+  private readonly fallback: Phaser.GameObjects.GameObject[] = [];
+  private pendingArtKey: string | null = null;
+  private image: Phaser.GameObjects.Image | null = null;
 
   constructor(scene: Phaser.Scene, width: number, height: number) {
     this.scene = scene;
+    this.width = width;
+    this.height = height;
+
+    const art = BACKGROUND_ASSETS[height > width ? 'portrait' : 'landscape'];
+    if (scene.textures.exists(art.key)) {
+      this.showArt(art.key);
+      return;
+    }
+
+    this.drawFallback(width, height);
+    this.requestArt(art);
+  }
+
+  /** The texture on display, or null while the drawn fallback is showing. */
+  get artKey(): string | null {
+    return this.image?.texture.key ?? null;
+  }
+
+  private showArt(key: string): void {
+    this.image = this.scene.add.image(this.width / 2, this.height / 2, key).setDisplaySize(this.width, this.height).setDepth(DEPTH.backdrop);
+    this.objects.push(this.image);
+  }
+
+  /** Only one orientation is loaded at boot. The other is fetched the first time it's needed. */
+  private requestArt(art: ImageAsset): void {
+    const { load } = this.scene;
+    this.pendingArtKey = art.key;
+    load.once(`${Phaser.Loader.Events.FILE_COMPLETE}-image-${art.key}`, this.onArtLoaded, this);
+    load.image(art.key, art.path);
+    load.start();
+  }
+
+  private onArtLoaded(key: string): void {
+    this.pendingArtKey = null;
+    this.scene.tweens.killTweensOf(this.lamps);
+    for (const obj of [...this.fallback, ...this.objects]) obj.destroy();
+    this.fallback.length = 0;
+    this.objects.length = 0;
+    this.lamps.length = 0;
+    this.showArt(key);
+  }
+
+  private drawFallback(width: number, height: number): void {
+    const { scene } = this;
 
     const g = scene.add.graphics().setDepth(DEPTH.backdrop);
     this.objects.push(g);
@@ -104,6 +154,10 @@ export class Backdrop {
   }
 
   destroy(): void {
+    if (this.pendingArtKey !== null) {
+      this.scene.load.off(`${Phaser.Loader.Events.FILE_COMPLETE}-image-${this.pendingArtKey}`, this.onArtLoaded, this);
+      this.pendingArtKey = null;
+    }
     this.scene.tweens.killTweensOf(this.lamps);
     for (const obj of this.objects) obj.destroy();
     this.objects.length = 0;

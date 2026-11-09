@@ -97,7 +97,8 @@ src/
     scenes/               Boot, Menu, Game, Pause, GameOver + SceneDirector
     utils/                Seeded RNG, storage access
 tests/                    Vitest specs for the pure systems and layout
-public/assets/            Reserved for Blender-rendered images and audio
+public/assets/images/blender/  Production WebP art generated from blender/
+blender/                  Asset scripts, editable scenes, previews
 ```
 
 ### Architecture notes
@@ -117,8 +118,11 @@ public/assets/            Reserved for Blender-rendered images and audio
 - **Responsive without distortion.** Phaser's `FIT` scale mode letterboxes a
   fixed design size. The game switches between a 1280×720 landscape layout and
   a 720×1280 portrait layout to match the window, and scenes re-layout live.
-- **Placeholder art.** All art is generated at boot with Phaser Graphics
-  (`ui/textures.ts`). Texture keys there are the swap points for Blender renders.
+- **Blender art, with drawn fallbacks.** Parcels, bins, conveyor parts and
+  backgrounds are rendered from scripts in `blender/` (see `blender/README.md`)
+  and listed in `src/game/assets/assetManifest.ts`. If an image fails to load,
+  a drawn version of that same item is used, never a different variant. Parcel
+  labels, symbols and all HUD text stay live in Phaser.
 
 ## Playtest guide
 

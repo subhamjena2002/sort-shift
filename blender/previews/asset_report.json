@@ -1,0 +1,157 @@
+{
+  "totalBytes": 116440,
+  "assets": [
+    {
+      "name": "blue_square",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 3880,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "blue_circle",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 8926,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "red_square",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 4002,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "red_circle",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 8984,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "yellow_square",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 4258,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "yellow_circle",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 9872,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "green_square",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 3910,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "green_circle",
+      "group": "parcels",
+      "width": 256,
+      "height": 256,
+      "bytes": 9140,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "golden_bonus",
+      "group": "parcels",
+      "width": 368,
+      "height": 368,
+      "bytes": 16894,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "conveyor_belt_tile",
+      "group": "conveyor",
+      "width": 256,
+      "height": 128,
+      "bytes": 1262,
+      "opaque": true,
+      "maxCornerAlpha": 1.0,
+      "seam": {
+        "wrap": 0.001,
+        "adjacentRow": 0.0008
+      }
+    },
+    {
+      "name": "conveyor_rail",
+      "group": "conveyor",
+      "width": 64,
+      "height": 128,
+      "bytes": 470,
+      "opaque": true,
+      "maxCornerAlpha": 1.0,
+      "seam": {
+        "wrap": 0.0063,
+        "adjacentRow": 0.0004
+      }
+    },
+    {
+      "name": "conveyor_roller",
+      "group": "conveyor",
+      "width": 96,
+      "height": 96,
+      "bytes": 3598,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "sorting_bin_left",
+      "group": "bins",
+      "width": 420,
+      "height": 420,
+      "bytes": 6890,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "sorting_bin_right",
+      "group": "bins",
+      "width": 420,
+      "height": 420,
+      "bytes": 6728,
+      "opaque": false,
+      "maxCornerAlpha": 0.0
+    },
+    {
+      "name": "factory_landscape",
+      "group": "backgrounds",
+      "width": 1280,
+      "height": 720,
+      "bytes": 14262,
+      "opaque": true,
+      "maxCornerAlpha": 1.0
+    },
+    {
+      "name": "factory_portrait",
+      "group": "backgrounds",
+      "width": 720,
+      "height": 1280,
+      "bytes": 13364,
+      "opaque": true,
+      "maxCornerAlpha": 1.0
+    }
+  ]
+}

@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import type { Parcel } from '../../types/game';
-import { PARCEL_COLORS, parcelTextureKey } from '../data/parcelCatalog';
+import { PARCEL_ART, TEXTURE_KEYS } from '../assets/assetManifest';
+import { PARCEL_COLORS } from '../data/parcelCatalog';
 import type { Point } from '../ui/layout';
-import { applyParcelLabel, createParcelLabel } from '../ui/ParcelPreview';
+import { createParcelParts, dressParcel, type ParcelParts } from '../ui/ParcelPreview';
 import { PARCEL_TEXTURE_SIZE, TEXTURES } from '../ui/textures';
 import { COLORS, DEPTH } from '../ui/theme';
 
@@ -23,9 +24,9 @@ export class ParcelView {
   private readonly trail: Phaser.GameObjects.Image;
   private readonly glow: Phaser.GameObjects.Image;
   private readonly rays: Phaser.GameObjects.Image;
-  private readonly body: Phaser.GameObjects.Image;
+  private readonly goldCarrier: Phaser.GameObjects.Image;
+  private readonly parts: ParcelParts;
   private readonly goldRim: Phaser.GameObjects.Image;
-  private readonly label: Phaser.GameObjects.Text;
   private readonly baseScale: number;
   private currentId: number | null = null;
   private laneX = 0;
@@ -46,12 +47,12 @@ export class ParcelView {
     this.rays = new Phaser.GameObjects.Image(scene, 0, 0, TEXTURES.goldRays)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setVisible(false);
-    this.body = new Phaser.GameObjects.Image(scene, 0, 0, PARCEL_COLORS.BLUE.textureKey);
+    this.goldCarrier = new Phaser.GameObjects.Image(scene, 0, 0, '__WHITE').setVisible(false);
+    this.parts = createParcelParts(scene);
     this.goldRim = new Phaser.GameObjects.Image(scene, 0, 0, TEXTURES.goldRimSquare).setVisible(false);
-    this.label = createParcelLabel(scene);
 
     this.container = scene.add
-      .container(0, 0, [this.shadow, this.trail, this.glow, this.rays, this.body, this.goldRim, this.label])
+      .container(0, 0, [this.shadow, this.trail, this.glow, this.rays, this.goldCarrier, this.parts.body, this.goldRim, this.parts.symbol, this.parts.label])
       .setDepth(DEPTH.parcel)
       .setVisible(false);
   }
@@ -81,13 +82,19 @@ export class ParcelView {
     this.currentId = parcel.id;
     this.laneX = x;
 
-    this.body.setTexture(parcelTextureKey(color, shape)).clearTint();
-    this.shadow.setTexture(shape === 'CIRCLE' ? TEXTURES.parcelShadowCircle : TEXTURES.parcelShadow);
+    const rendered = dressParcel(this.scene, this.parts, parcel.attributes);
+    // Rendered parcels carry their own contact shadow.
+    this.shadow.setVisible(!rendered).setTexture(shape === 'CIRCLE' ? TEXTURES.parcelShadowCircle : TEXTURES.parcelShadow);
     this.trail.setTint(golden ? COLORS.gold : def.fill);
     this.glow.setTint(golden ? COLORS.gold : def.fill).setAlpha(golden ? GOLDEN_GLOW : IDLE_GLOW);
     this.rays.setVisible(golden).setAngle(0);
-    this.goldRim.setVisible(golden).setTexture(shape === 'CIRCLE' ? TEXTURES.goldRimCircle : TEXTURES.goldRimSquare);
-    applyParcelLabel(this.label, parcel.attributes);
+
+    // A golden parcel keeps its real colour and shape, because it is still
+    // sorted by the active rule. The gold carrier sits underneath it.
+    const carrierLoaded = this.scene.textures.exists(TEXTURE_KEYS.PARCEL_GOLDEN_BONUS);
+    this.goldCarrier.setVisible(golden && carrierLoaded);
+    if (carrierLoaded) this.goldCarrier.setTexture(TEXTURE_KEYS.PARCEL_GOLDEN_BONUS).setScale(PARCEL_ART.goldenScale);
+    this.goldRim.setVisible(golden && !carrierLoaded).setTexture(shape === 'CIRCLE' ? TEXTURES.goldRimCircle : TEXTURES.goldRimSquare);
 
     this.container
       .setPosition(x, y)
@@ -119,7 +126,7 @@ export class ParcelView {
     this.scene.tweens.killTweensOf(this.container);
     this.container.setAlpha(1).setScale(this.baseScale);
     this.trail.setAlpha(0);
-    if (!correct) this.body.setTint(0xff8a7a);
+    if (!correct) this.parts.body.setTint(0xff8a7a);
     const direction = target.x < this.container.x ? -1 : 1;
     this.scene.tweens.add({
       targets: this.container,

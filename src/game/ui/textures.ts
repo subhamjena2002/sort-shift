@@ -42,6 +42,20 @@ function withGraphics(scene: Phaser.Scene, key: string, width: number, height: n
   g.destroy();
 }
 
+export function symbolTextureKey(color: ParcelColor): string {
+  return `parcel-symbol-${color.toLowerCase()}`;
+}
+
+const SYMBOL_BADGE_SIZE = 44;
+
+/** The colour symbol on a light disc, drawn over rendered parcels at runtime. */
+function drawSymbolBadge(g: Phaser.GameObjects.Graphics, color: ParcelColor): void {
+  const c = SYMBOL_BADGE_SIZE / 2;
+  g.fillStyle(0xf4f6fa, 1);
+  g.fillCircle(c, c, c - 1);
+  drawColorSymbol(g, color, c, c);
+}
+
 /** A small symbol unique to each colour, so hue is never the only cue on a parcel. */
 function drawColorSymbol(g: Phaser.GameObjects.Graphics, color: ParcelColor, x: number, y: number): void {
   const r = 10;
@@ -335,6 +349,7 @@ function drawGlowDot(g: Phaser.GameObjects.Graphics): void {
 export function generateSharedTextures(scene: Phaser.Scene): void {
   for (const color of ALL_COLORS) {
     const def = PARCEL_COLORS[color];
+    withGraphics(scene, symbolTextureKey(color), SYMBOL_BADGE_SIZE, SYMBOL_BADGE_SIZE, (g) => drawSymbolBadge(g, color));
     for (const shape of ALL_SHAPES) {
       withGraphics(scene, parcelTextureKey(color, shape), PARCEL_TEXTURE_SIZE, PARCEL_TEXTURE_SIZE, (g) =>
         shape === 'CIRCLE' ? drawCircleParcel(g, def) : drawParcel(g, def),

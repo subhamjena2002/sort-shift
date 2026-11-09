@@ -20,6 +20,13 @@ interface ViewInternals {
   readonly conveyor: { readonly surface: Phaser.GameObjects.TileSprite };
   readonly announcement: { readonly isShowing: boolean; isArmed(now: number): boolean; readonly title: Phaser.GameObjects.Text };
   readonly countdown: { readonly value: number | null };
+  readonly backdrop: { readonly artKey: string | null };
+  readonly bins: Readonly<Record<BinSide, { readonly container: Phaser.GameObjects.Container }>>;
+  readonly parcels: readonly {
+    readonly parcelId: number | null;
+    readonly parts: { readonly body: Phaser.GameObjects.Image };
+    readonly goldCarrier: Phaser.GameObjects.Image;
+  }[];
   readonly hud: {
     readonly ruleTitle: Phaser.GameObjects.Text;
     readonly ruleRows: readonly Phaser.GameObjects.Container[];
@@ -123,6 +130,11 @@ class E2EBridge {
     const active = session?.activeParcel ?? null;
     const transition = session?.transition ?? null;
     const rule = session?.rule ?? null;
+    const parcelView = view?.parcels.find((p) => active !== null && p.parcelId === active.parcel.id) ?? null;
+    const binTexture = (side: BinSide): string | null => {
+      const image = view?.bins[side].container.list[0] as Phaser.GameObjects.Image | undefined;
+      return image?.texture?.key ?? null;
+    };
     const mapping = (side: BinSide): string[] => (rule ? clausesForSide(rule, side).map((c) => glyphForClause(c).longText) : []);
 
     return {
@@ -150,6 +162,11 @@ class E2EBridge {
         expected: destinationFor(active.rule, active.parcel.attributes),
       },
       goldenSeen: this.goldenSeen,
+      activeTexture: parcelView?.parts.body.texture.key ?? null,
+      activeCarrierVisible: parcelView?.goldCarrier.visible ?? false,
+      backgroundTexture: view?.backdrop.artKey ?? null,
+      binTextures: { LEFT: binTexture('LEFT'), RIGHT: binTexture('RIGHT') },
+      loadedArt: this.game.textures.getTextureKeys().filter((key) => /^(PARCEL|CONVEYOR|SORTING|FACTORY)_/.test(key)),
       announcementVisible: view?.announcement.isShowing ?? false,
       announcementTitle: view?.announcement.title.text ?? null,
       readyArmed: view ? view.announcement.isArmed(scene.time.now) : false,
